@@ -6,9 +6,9 @@
 #SBATCH --mem={{MEMORY}}
 #SBATCH --time={{TIME}}
 #SBATCH --partition={{PARTITION}}
-#SBATCH --account={{ACCOUNT}}{{#USE_BURST}}-b{{/USE_BURST}}
-{{#USER_EMAIL}}#SBATCH --mail-user={{USER_EMAIL}}{{/USER_EMAIL}}
-{{#USER_EMAIL}}#SBATCH --mail-type=ALL{{/USER_EMAIL}}
+#SBATCH --account={{ACCOUNT}}
+{{QOS_LINE}}
+{{EMAIL_LINES}}
 
 # Load required modules
 module load deeptools
@@ -55,7 +55,6 @@ echo "Processing $(ls ${PROJECT_ID}.chunks${RND}.* | wc -l) chunks..."
 # Process each chunk
 for chunk in ${PROJECT_ID}.chunks${RND}.*; do
     echo "Processing chunk: $chunk"
-    
     computeMatrix reference-point \
         --referencePoint {{REFERENCE_POINT}} \
         -R $chunk \
@@ -78,7 +77,7 @@ rm ${PROJECT_ID}.chunks${RND}.*
 
 echo "Generating heatmap..."
 
-# Generate heatmap  
+# Generate heatmap
 plotHeatmap \
     -m ${PROJECT_ID}_matrix.gz \
     -o ${PROJECT_ID}_heatmap.png \
@@ -92,6 +91,5 @@ plotHeatmap \
     --yMin {{Y_MIN}} \
     --yMax {{Y_MAX}} \
     --outFileSortedRegions ${PROJECT_ID}_sorted.bed
-
 
 echo "Analysis complete!"
