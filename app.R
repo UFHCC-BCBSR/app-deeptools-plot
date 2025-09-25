@@ -190,7 +190,7 @@ ui <- fluidPage(
           ),
           br(),
           h5("Sample Information File (CSV)", tags$span("*", style = "color: red; font-size: 12px;", "(Required for Profile plots)")),
-          p("Upload a CSV file with sample information (columns: sample, group, color):"),
+          p("Upload a CSV file with sample information. Required columns: sample, group, color. Optional: sample_label (for custom plot labels):"),
           fileInput("sample_info_file", NULL,
                     accept = ".csv",
                     buttonLabel = "Browse for Sample Info...",
@@ -347,11 +347,21 @@ server <- function(input, output, session) {
       
       # Validate columns
       required_cols <- c("sample", "group", "color")
-      if(!all(required_cols %in% colnames(sample_data))) {
-        showNotification(paste("CSV must contain columns:", paste(required_cols, collapse = ", ")), 
-                         type = "error")
+      optional_cols <- c("sample_label")
+      all_required_present <- all(required_cols %in% colnames(sample_data))
+      
+      if(!all_required_present) {
+        showNotification(paste("CSV must contain columns:", paste(required_cols, collapse = ", ")), type = "error")
         values$sample_info <- NULL
         return()
+      }
+      
+      # Check if optional sample_label column exists
+      has_sample_label <- "sample_label" %in% colnames(sample_data)
+      if(has_sample_label) {
+        cat("Found sample_label column - will use for plot labels\n")
+      } else {
+        cat("No sample_label column found - will use sample names for labels\n")
       }
       
       # Store the sample info
@@ -682,9 +692,15 @@ server <- function(input, output, session) {
         sample_labels_str <- paste0('"', paste(basename(bigwig_files_to_use), collapse = '" "'), '"')
       }
     } else {
-      # For profile plots, use the processed sample info
+      # For profile plots, use sample_label if available, otherwise use sample
       if(!is.null(values$processed_sample_info)) {
-        sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample, collapse = '" "'), '"')
+        if("sample_label" %in% colnames(values$processed_sample_info)) {
+          # Use sample_label column
+          sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample_label, collapse = '" "'), '"')
+        } else {
+          # Fall back to sample column
+          sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample, collapse = '" "'), '"')
+        }
       } else {
         sample_labels_str <- paste0('"', paste(basename(bigwig_files_to_use), collapse = '" "'), '"')
       }
