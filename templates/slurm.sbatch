@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name={{PROJECT_ID}}_tornado
-#SBATCH --output={{OUTPUT_DIR}}/{{PROJECT_ID}}_tornado_%j.out
-#SBATCH --error={{OUTPUT_DIR}}/{{PROJECT_ID}}_tornado_%j.err
+#SBATCH --output={{OUTPUT_DIR}}/logs/{{PROJECT_ID}}_tornado_%j.out
+#SBATCH --error={{OUTPUT_DIR}}/logs/{{PROJECT_ID}}_tornado_%j.err
 #SBATCH --cpus-per-task={{CPUS}}
 #SBATCH --mem={{MEMORY}}
 #SBATCH --time={{TIME}}
