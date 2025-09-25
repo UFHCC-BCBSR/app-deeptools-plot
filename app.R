@@ -316,7 +316,7 @@ ui <- fluidPage(
 )
 
 server <- function(input, output, session) {
-  
+  `%||%` <- function(x, y) if (is.null(x)) y else x
   values <- reactiveValues(
     authenticated = FALSE,
     volume_root = NULL,
@@ -387,6 +387,41 @@ server <- function(input, output, session) {
       files <- parseFilePaths(setNames(values$volume_root, input$group_name), input$browse_regions)
       if(nrow(files) > 0) {
         values$selected_regions_file <- as.character(files$datapath)
+      }
+    }
+  })
+  # Observer for custom BigWig path
+  observeEvent(input$custom_path_bigwig, {
+    if(values$authenticated && input$custom_path_bigwig != "") {
+      custom_root <- file.path(values$volume_root, input$custom_path_bigwig)
+      if(dir.exists(custom_root)) {
+        shinyFileChoose(input, "browse_bigwig",
+                        roots = setNames(custom_root, basename(custom_root)),
+                        filetypes = c("bw", "bigwig"))
+      } else {
+        showNotification("Custom path does not exist!", type = "warning")
+        # Reset to volume root
+        shinyFileChoose(input, "browse_bigwig",
+                        roots = setNames(values$volume_root, input$group_name),
+                        filetypes = c("bw", "bigwig"))
+      }
+    }
+  })
+  
+  # Observer for custom regions path
+  observeEvent(input$custom_path_regions, {
+    if(values$authenticated && input$custom_path_regions != "") {
+      custom_root <- file.path(values$volume_root, input$custom_path_regions)
+      if(dir.exists(custom_root)) {
+        shinyFileChoose(input, "browse_regions",
+                        roots = setNames(custom_root, basename(custom_root)),
+                        filetypes = c("bed", "txt", "csv"))
+      } else {
+        showNotification("Custom path does not exist!", type = "warning")
+        # Reset to volume root
+        shinyFileChoose(input, "browse_regions",
+                        roots = setNames(values$volume_root, input$group_name),
+                        filetypes = c("bed", "txt", "csv"))
       }
     }
   })
@@ -751,7 +786,7 @@ server <- function(input, output, session) {
     tryCatch({
       params <- jsonlite::read_json(input$load_params$datapath)
       
-      # Update all inputs
+      # Update all inputs with proper null checking
       updateTextInput(session, "project_id", value = params$project_id %||% "")
       updateTextInput(session, "output_dir", value = params$output_dir %||% "")
       updateSelectInput(session, "reference_point", selected = params$reference_point %||% "TSS")
@@ -779,11 +814,29 @@ server <- function(input, output, session) {
       updateCheckboxInput(session, "use_burst", value = params$use_burst %||% FALSE)
       updateTextInput(session, "user_email", value = params$user_email %||% "")
       
-      # Restore file selections
-      values$selected_bigwig_files <- params$selected_bigwig_files
-      values$selected_regions_file <- params$selected_regions_file
+      # Handle file selections - convert from JSON arrays
+      if(!is.null(params$selected_bigwig_files)) {
+        if(is.list(params$selected_bigwig_files)) {
+          values$selected_bigwig_files <- unlist(params$selected_bigwig_files)
+        } else {
+          values$selected_bigwig_files <- params$selected_bigwig_files
+        }
+      } else {
+        values$selected_bigwig_files <- NULL
+      }
+      
+      if(!is.null(params$selected_regions_file)) {
+        if(is.list(params$selected_regions_file)) {
+          values$selected_regions_file <- unlist(params$selected_regions_file)[1]  # Take first element
+        } else {
+          values$selected_regions_file <- params$selected_regions_file
+        }
+      } else {
+        values$selected_regions_file <- NULL
+      }
       
       showNotification("Parameters loaded successfully!", type = "message")
+      
     }, error = function(e) {
       showNotification(paste("Error loading parameters:", e$message), type = "error")
     })
