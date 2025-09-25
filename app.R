@@ -96,14 +96,12 @@ ui <- fluidPage(
       }
     "))
   ),
-  
   div(class = "title-section",
       h1("DeepTools Analysis Generator",
          style = "margin: 0; font-size: 48px; font-weight: 300;"),
       p("Generate heatmaps and profile plots from BigWig files using computeMatrix and plotHeatmap/plotProfile",
         style = "margin: 10px 0 0 0; font-size: 14px; opacity: 0.8;")
   ),
-  
   div(class = "step-section",
       h3("Parameter Management", style = "text-align: center; margin-bottom: 20px;"),
       div(class = "param-group",
@@ -117,7 +115,6 @@ ui <- fluidPage(
           div(id = "load_status", style = "margin-top: 10px;")
       )
   ),
-  
   div(class = "step-section",
       h3("HiPerGator File Access", style = "text-align: center; margin-bottom: 20px;"),
       uiOutput("auth_status"),
@@ -142,7 +139,6 @@ ui <- fluidPage(
         )
       )
   ),
-  
   div(class = "step-section",
       h2("Required Parameters", style = "text-align: center; margin-bottom: 30px;"),
       div(class = "param-group",
@@ -191,10 +187,18 @@ ui <- fluidPage(
             div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
                 tags$i(class = "fa fa-lock"), " Login above to browse HiPerGator files"
             )
-          )
+          ),
+          br(),
+          h5("Sample Information File (CSV)", tags$span("*", style = "color: red; font-size: 12px;", "(Required for Profile plots)")),
+          p("Upload a CSV file with sample information (columns: sample, group, color):"),
+          fileInput("sample_info_file", NULL,
+                    accept = ".csv",
+                    buttonLabel = "Browse for Sample Info...",
+                    placeholder = "No file selected",
+                    width = "100%"),
+          uiOutput("sample_info_preview")
       )
   ),
-  
   div(class = "step-section",
       h2("Analysis Parameters", style = "text-align: center; margin-bottom: 30px;"),
       div(class = "param-group",
@@ -226,7 +230,6 @@ ui <- fluidPage(
                                   selected = "max"))
           )
       ),
-      
       # Conditional UI for plot-specific parameters
       conditionalPanel(
         condition = "input.plot_type == 'heatmap'",
@@ -254,7 +257,6 @@ ui <- fluidPage(
                           placeholder = "Sample1\nSample2\nSample3", rows = 4)
         )
       ),
-      
       conditionalPanel(
         condition = "input.plot_type == 'profile'",
         div(class = "param-group",
@@ -269,18 +271,10 @@ ui <- fluidPage(
                                      value = 8, min = 4, max = 20)),
               column(6, numericInput("plot_height", "Plot Height",
                                      value = 6, min = 4, max = 15))
-            ),
-            div(
-              textAreaInput("sample_groups", "Sample Grouping (sample,group,color format)",
-                            placeholder = "Sample1,Group1,red\nSample2,Group1,red\nSample3,Group2,blue\nSample4,Group2,blue",
-                            rows = 6),
-              p("Format: one line per sample as 'SampleName,GroupName,Color'. Each group will get its own plot with all samples in that group using the specified color.",
-                style = "font-size: 12px; color: #6c757d; margin-top: 5px;")
             )
         )
       )
   ),
-  
   div(class = "step-section",
       h2("Computational Resources", style = "text-align: center; margin-bottom: 30px;"),
       div(class = "param-group",
@@ -300,7 +294,6 @@ ui <- fluidPage(
                     placeholder = "your.email@ufl.edu")
       )
   ),
-  
   div(class = "step-section",
       h2("Generate and Run Analysis", style = "text-align: center; margin-bottom: 30px;"),
       div(style = "text-align: center;",
@@ -331,10 +324,124 @@ server <- function(input, output, session) {
     volume_root = NULL,
     selected_bigwig_files = NULL,
     selected_regions_file = NULL,
+    sample_info = NULL,
+    filtered_bigwig_files = NULL,
+    processed_sample_info = NULL,
     analysis_running = FALSE,
     process = NULL,
     output_dir = NULL
   )
+  
+  # Process sample info file when uploaded
+  observeEvent(input$sample_info_file, {
+    if(is.null(input$sample_info_file)) {
+      values$sample_info <- NULL
+      values$filtered_bigwig_files <- NULL
+      values$processed_sample_info <- NULL
+      return()
+    }
+    
+    tryCatch({
+      # Read the CSV file
+      sample_data <- read.csv(input$sample_info_file$datapath, stringsAsFactors = FALSE)
+      
+      # Validate columns
+      required_cols <- c("sample", "group", "color")
+      if(!all(required_cols %in% colnames(sample_data))) {
+        showNotification(paste("CSV must contain columns:", paste(required_cols, collapse = ", ")), 
+                         type = "error")
+        values$sample_info <- NULL
+        return()
+      }
+      
+      # Store the sample info
+      values$sample_info <- sample_data
+      
+      # Filter and reorder bigwig files if they exist
+      if(!is.null(values$selected_bigwig_files)) {
+        process_bigwig_files()
+      }
+      
+    }, error = function(e) {
+      showNotification(paste("Error reading CSV file:", e$message), type = "error")
+      values$sample_info <- NULL
+    })
+  })
+  
+  # Function to process bigwig files based on sample info
+  process_bigwig_files <- function() {
+    if(is.null(values$sample_info) || is.null(values$selected_bigwig_files)) {
+      return()
+    }
+    
+    sample_names <- values$sample_info$sample
+    bigwig_files <- values$selected_bigwig_files
+    
+    # Find matching bigwig files using whole word grep
+    matched_files <- c()
+    matched_samples <- c()
+    
+    for(sample_name in sample_names) {
+      # Use word boundary regex for whole word matching
+      pattern <- paste0("\\b", sample_name, "\\b")
+      matching_files <- bigwig_files[grepl(pattern, basename(bigwig_files), ignore.case = TRUE)]
+      
+      if(length(matching_files) > 0) {
+        # Take the first match if multiple files match
+        matched_files <- c(matched_files, matching_files[1])
+        matched_samples <- c(matched_samples, sample_name)
+      }
+    }
+    
+    # Store filtered and ordered results
+    values$filtered_bigwig_files <- matched_files
+    
+    # Create processed sample info in the same order as filtered bigwig files
+    if(length(matched_samples) > 0) {
+      values$processed_sample_info <- values$sample_info[match(matched_samples, values$sample_info$sample), ]
+    } else {
+      values$processed_sample_info <- NULL
+    }
+  }
+  
+  # Re-process when bigwig files are selected
+  observeEvent(values$selected_bigwig_files, {
+    if(!is.null(values$sample_info)) {
+      process_bigwig_files()
+    }
+  })
+  
+  # Display sample info preview
+  output$sample_info_preview <- renderUI({
+    if(!is.null(values$sample_info)) {
+      div(
+        h6("Sample Information Preview:"),
+        div(class = "selected-file",
+            style = "max-height: 120px;",  # Remove overflow-y: auto from here
+            DT::renderDataTable({
+              values$sample_info
+            }, options = list(
+              pageLength = -1,  # Show all rows
+              dom = 't',        # Table only
+              scrollX = TRUE,   # Horizontal scroll
+              scrollY = "100px", # Vertical scroll with specific height
+              scrollCollapse = TRUE,
+              paging = FALSE,
+              searching = FALSE,
+              info = FALSE
+            ))
+        ),
+        if(!is.null(values$filtered_bigwig_files)) {
+          div(style = "margin-top: 10px;",
+              h6(paste("Matched", length(values$filtered_bigwig_files), "BigWig files out of", 
+                       length(values$selected_bigwig_files), "selected:")),
+              div(class = "selected-file",
+                  paste(basename(values$filtered_bigwig_files), collapse = "\n"))
+          )
+        }
+      )
+    }
+  })
   
   observeEvent(input$login_btn, {
     if(input$group_name != "" && input$group_password != "") {
@@ -434,11 +541,18 @@ server <- function(input, output, session) {
   })
   
   output$selected_bigwig_files <- renderUI({
-    if(!is.null(values$selected_bigwig_files) && length(values$selected_bigwig_files) > 0) {
+    # Show filtered files if sample info is uploaded, otherwise show all selected files
+    files_to_show <- if(!is.null(values$filtered_bigwig_files)) {
+      values$filtered_bigwig_files
+    } else {
+      values$selected_bigwig_files
+    }
+    
+    if(!is.null(files_to_show) && length(files_to_show) > 0) {
       div(
-        h6(paste("Selected", length(values$selected_bigwig_files), "BigWig files:")),
+        h6(paste("Selected", length(files_to_show), "BigWig files:")),
         div(class = "selected-file",
-            paste(basename(values$selected_bigwig_files), collapse = "\n"))
+            paste(basename(files_to_show), collapse = "\n"))
       )
     }
   })
@@ -462,7 +576,14 @@ server <- function(input, output, session) {
     errors <- c()
     warnings <- c()
     
-    if(is.null(values$selected_bigwig_files) || length(values$selected_bigwig_files) == 0) {
+    # Use filtered files if available, otherwise use all selected files
+    bigwig_files_to_use <- if(!is.null(values$filtered_bigwig_files)) {
+      values$filtered_bigwig_files
+    } else {
+      values$selected_bigwig_files
+    }
+    
+    if(is.null(bigwig_files_to_use) || length(bigwig_files_to_use) == 0) {
       errors <- c(errors, "No BigWig files selected")
     }
     
@@ -482,6 +603,7 @@ server <- function(input, output, session) {
     if(input$sbatch_account == "" || is.null(input$sbatch_account)) {
       errors <- c(errors, "Account is required for SLURM submission")
     }
+    
     if(input$user_email == "" || is.null(input$user_email)) {
       warnings <- c(warnings, "Email is recommended for job notifications")
     }
@@ -491,38 +613,17 @@ server <- function(input, output, session) {
       if(input$sample_labels != "") {
         labels <- trimws(unlist(strsplit(input$sample_labels, "\n")))
         labels <- labels[labels != ""]
-        if(length(labels) != length(values$selected_bigwig_files)) {
+        if(length(labels) != length(bigwig_files_to_use)) {
           warnings <- c(warnings, paste("Number of sample labels (", length(labels),
                                         ") doesn't match number of BigWig files (",
-                                        length(values$selected_bigwig_files), ")"))
+                                        length(bigwig_files_to_use), ")"))
         }
       }
     } else if(input$plot_type == "profile") {
-      if(input$sample_groups == "" || is.null(input$sample_groups)) {
-        errors <- c(errors, "Sample grouping is required for profile plots")
-      } else {
-        # Validate sample grouping format
-        group_lines <- trimws(unlist(strsplit(input$sample_groups, "\n")))
-        group_lines <- group_lines[group_lines != ""]
-        
-        valid_format <- TRUE
-        sample_names <- c()
-        for(line in group_lines) {
-          parts <- trimws(unlist(strsplit(line, ",")))
-          if(length(parts) != 3) {
-            valid_format <- FALSE
-            break
-          }
-          sample_names <- c(sample_names, parts[1])
-        }
-        
-        if(!valid_format) {
-          errors <- c(errors, "Sample grouping must be in format: SampleName,GroupName,Color (one per line)")
-        } else if(length(sample_names) != length(values$selected_bigwig_files)) {
-          errors <- c(errors, paste("Number of samples in grouping (", length(sample_names),
-                                    ") doesn't match number of BigWig files (",
-                                    length(values$selected_bigwig_files), ")"))
-        }
+      if(is.null(values$sample_info)) {
+        errors <- c(errors, "Sample information CSV file is required for profile plots")
+      } else if(is.null(values$processed_sample_info) || nrow(values$processed_sample_info) == 0) {
+        errors <- c(errors, "No BigWig files matched the sample names in the CSV file")
       }
     }
     
@@ -559,25 +660,34 @@ server <- function(input, output, session) {
     
     template_content <- readLines(template_file)
     
+    # Use filtered files if available, otherwise use all selected files
+    bigwig_files_to_use <- if(!is.null(values$filtered_bigwig_files)) {
+      values$filtered_bigwig_files
+    } else {
+      values$selected_bigwig_files
+    }
+    
     # Generate sample labels or groups based on plot type
     if(input$plot_type == "heatmap") {
       sample_labels_str <- ""
       if(input$sample_labels != "") {
         labels <- trimws(unlist(strsplit(input$sample_labels, "\n")))
         labels <- labels[labels != ""]
-        if(length(labels) == length(values$selected_bigwig_files)) {
+        if(length(labels) == length(bigwig_files_to_use)) {
           sample_labels_str <- paste0('"', paste(labels, collapse = '" "'), '"')
         } else {
-          sample_labels_str <- paste0('"', paste(basename(values$selected_bigwig_files), collapse = '" "'), '"')
+          sample_labels_str <- paste0('"', paste(basename(bigwig_files_to_use), collapse = '" "'), '"')
         }
       } else {
-        sample_labels_str <- paste0('"', paste(basename(values$selected_bigwig_files), collapse = '" "'), '"')
+        sample_labels_str <- paste0('"', paste(basename(bigwig_files_to_use), collapse = '" "'), '"')
       }
     } else {
-      # For profile plots, we need to process the grouping
-      group_lines <- trimws(unlist(strsplit(input$sample_groups, "\n")))
-      group_lines <- group_lines[group_lines != ""]
-      sample_labels_str <- paste0('"', paste(sapply(group_lines, function(x) unlist(strsplit(x, ","))[1]), collapse = '" "'), '"')
+      # For profile plots, use the processed sample info
+      if(!is.null(values$processed_sample_info)) {
+        sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample, collapse = '" "'), '"')
+      } else {
+        sample_labels_str <- paste0('"', paste(basename(bigwig_files_to_use), collapse = '" "'), '"')
+      }
     }
     
     skip_zeros_param <- ifelse(input$skip_zeros, "--skipZeros", "")
@@ -602,7 +712,7 @@ server <- function(input, output, session) {
     script_content <- gsub("{{Y_MAX}}", as.character(input$y_max), script_content, fixed = TRUE)
     script_content <- gsub("{{OUTPUT_DIR}}", file.path(input$output_dir, input$project_id), script_content, fixed = TRUE)
     script_content <- gsub("{{REGIONS_FILE}}", values$selected_regions_file, script_content, fixed = TRUE)
-    script_content <- gsub("{{BIGWIG_FILES}}", paste(paste0('"', values$selected_bigwig_files, '"'), collapse = " "), script_content, fixed = TRUE)
+    script_content <- gsub("{{BIGWIG_FILES}}", paste(paste0('"', bigwig_files_to_use, '"'), collapse = " "), script_content, fixed = TRUE)
     script_content <- gsub("{{REFERENCE_POINT}}", input$reference_point, script_content, fixed = TRUE)
     script_content <- gsub("{{BEFORE_REGION}}", as.character(input$before_region), script_content, fixed = TRUE)
     script_content <- gsub("{{AFTER_REGION}}", as.character(input$after_region), script_content, fixed = TRUE)
@@ -635,30 +745,36 @@ server <- function(input, output, session) {
       script_content <- gsub("{{Y_AXIS_LABEL_PROFILE}}", input$y_axis_label_profile, script_content, fixed = TRUE)
       script_content <- gsub("{{PLOT_WIDTH}}", as.character(input$plot_width), script_content, fixed = TRUE)
       script_content <- gsub("{{PLOT_HEIGHT}}", as.character(input$plot_height), script_content, fixed = TRUE)
-      script_content <- gsub("{{SAMPLE_GROUPS}}", gsub("\n", "\\n", input$sample_groups, fixed = TRUE), script_content, fixed = TRUE)
       
-      # Process sample groups for plotting
-      group_lines <- trimws(unlist(strsplit(input$sample_groups, "\n")))
-      group_lines <- group_lines[group_lines != ""]
-      
-      # Extract sample labels and colors
-      sample_labels <- sapply(group_lines, function(x) unlist(strsplit(x, ","))[1])
-      sample_colors <- sapply(group_lines, function(x) unlist(strsplit(x, ","))[3])
-      
-      # Create strings for substitution
-      sample_labels_str <- paste(sample_labels, collapse = " ")
-      sample_colors_str <- paste(tolower(sample_colors), collapse = " ")  # Convert to lowercase
-      
-      # Substitute into template
-      script_content <- gsub("{{SAMPLE_LABELS_OVERLAY}}", sample_labels_str, script_content, fixed = TRUE)
-      script_content <- gsub("{{SAMPLE_COLORS_OVERLAY}}", sample_colors_str, script_content, fixed = TRUE)
+      # Process sample groups for plotting using the processed sample info
+      if(!is.null(values$processed_sample_info)) {
+        # Create strings for substitution
+        sample_labels_str <- paste(values$processed_sample_info$sample, collapse = " ")
+        sample_colors_str <- paste(tolower(values$processed_sample_info$color), collapse = " ")  # Convert to lowercase
+        
+        # Substitute into template
+        script_content <- gsub("{{SAMPLE_LABELS_OVERLAY}}", sample_labels_str, script_content, fixed = TRUE)
+        script_content <- gsub("{{SAMPLE_COLORS_OVERLAY}}", sample_colors_str, script_content, fixed = TRUE)
+        
+        # Create sample groups string for the template
+        sample_groups_str <- paste(apply(values$processed_sample_info, 1, function(row) {
+          paste(row[1], row[2], row[3], sep = ",")
+        }), collapse = "\\n")
+        script_content <- gsub("{{SAMPLE_GROUPS}}", sample_groups_str, script_content, fixed = TRUE)
+      }
     }
     
     return(paste(script_content, collapse = "\n"))
   }
   
   output$script_preview <- renderText({
-    if(is.null(values$selected_bigwig_files) ||
+    bigwig_files_to_use <- if(!is.null(values$filtered_bigwig_files)) {
+      values$filtered_bigwig_files
+    } else {
+      values$selected_bigwig_files
+    }
+    
+    if(is.null(bigwig_files_to_use) ||
        is.null(values$selected_regions_file) ||
        input$project_id == "" ||
        input$output_dir == "") {
@@ -695,10 +811,12 @@ server <- function(input, output, session) {
     
     template_name <- paste0("templates/", input$plot_type, "_slurm.sbatch")
     script_content <- generate_script_from_template(template_name)
+    
     script_file <- file.path(values$output_dir, paste0(input$plot_type, "_analysis.sbatch"))
     writeLines(script_content, script_file)
     
     result <- system2("sbatch", args = script_file, stdout = TRUE, stderr = TRUE)
+    
     if(length(result) > 0 && grepl("Submitted batch job", result[1])) {
       job_id <- gsub(".*job ([0-9]+).*", "\\1", result[1])
       showNotification(paste("Job submitted successfully! Job ID:", job_id), type = "message")
@@ -783,6 +901,7 @@ server <- function(input, output, session) {
         plot_type = input$plot_type,
         selected_bigwig_files = values$selected_bigwig_files,
         selected_regions_file = values$selected_regions_file,
+        sample_info_file = if(!is.null(input$sample_info_file)) input$sample_info_file$name else NULL,
         reference_point = input$reference_point,
         before_region = input$before_region,
         after_region = input$after_region,
@@ -805,7 +924,6 @@ server <- function(input, output, session) {
         y_axis_label_profile = input$y_axis_label_profile,
         plot_width = input$plot_width,
         plot_height = input$plot_height,
-        sample_groups = input$sample_groups,
         # Execution parameters
         sbatch_cpus = input$sbatch_cpus,
         sbatch_memory = input$sbatch_memory,
@@ -854,10 +972,8 @@ server <- function(input, output, session) {
       updateTextInput(session, "y_axis_label_profile", value = params$y_axis_label_profile %||% "mean RPKM")
       updateNumericInput(session, "plot_width", value = params$plot_width %||% 8)
       updateNumericInput(session, "plot_height", value = params$plot_height %||% 6)
-      updateTextAreaInput(session, "sample_groups", value = params$sample_groups %||% "")
       
       # Execution parameters
-      updateRadioButtons(session, "execution_method", selected = params$execution_method %||% "direct")
       updateNumericInput(session, "sbatch_cpus", value = params$sbatch_cpus %||% 8)
       updateTextInput(session, "sbatch_memory", value = params$sbatch_memory %||% "32G")
       updateTextInput(session, "sbatch_time", value = params$sbatch_time %||% "4:00:00")
@@ -888,6 +1004,7 @@ server <- function(input, output, session) {
       }
       
       showNotification("Parameters loaded successfully!", type = "message")
+      
     }, error = function(e) {
       showNotification(paste("Error loading parameters:", e$message), type = "error")
     })
@@ -926,4 +1043,3 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui = ui, server = server)
-  
