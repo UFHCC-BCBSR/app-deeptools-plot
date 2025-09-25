@@ -1,0 +1,815 @@
+# app.R
+library(shiny)
+library(shinydashboard)
+library(shinyFiles)
+library(shinyjs)
+library(DT)
+library(processx)
+library(jsonlite)
+
+# UI
+ui <- fluidPage(
+  useShinyjs(),
+  tags$head(
+    tags$style(HTML("
+      body { background-color: #f4f4f4; }
+      .title-section {
+        text-align: center;
+        padding: 15px 0;
+        background-color: #2c3e50;
+        color: white;
+      }
+      .step-section {
+        background-color: white;
+        margin: 10px;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .param-group {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: #f8f9fa;
+      }
+      .param-group h4 {
+        margin-top: 0;
+        margin-bottom: 8px;
+        color: #495057;
+        border-bottom: 1px solid #dee2e6;
+        padding-bottom: 5px;
+      }
+      .selected-file {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 6px 10px;
+        margin-top: 6px;
+        font-family: monospace;
+        font-size: 11px;
+        color: #495057;
+        max-height: 60px;
+        overflow-y: auto;
+      }
+      .login-box {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+      .auth-status {
+        padding: 8px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+      .auth-success {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+      .auth-needed {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        color: #856404;
+      }
+      .validation-message {
+        padding: 8px;
+        border-radius: 4px;
+        margin: 8px 0;
+      }
+      .validation-success {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+      .validation-error {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+      .validation-warning {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        color: #856404;
+      }
+    "))
+  ),
+  
+  div(class = "title-section",
+      h1("DeepTools Tornado Plot Generator",
+         style = "margin: 0; font-size: 48px; font-weight: 300;"),
+      p("Generate tornado plots and heatmaps from BigWig files using computeMatrix and plotHeatmap",
+        style = "margin: 10px 0 0 0; font-size: 14px; opacity: 0.8;")
+  ),
+  div(class = "step-section",
+      h3("Parameter Management", style = "text-align: center; margin-bottom: 20px;"),
+      div(class = "param-group",
+          h4("Load Saved Parameters"),
+          p("Load previously saved parameters to quickly restore your configuration:"),
+          fileInput("load_params", NULL, 
+                    accept = ".json",
+                    buttonLabel = "Browse for Parameter File...",
+                    placeholder = "No file selected",
+                    width = "100%"),
+          div(id = "load_status", style = "margin-top: 10px;")
+      )
+  ),
+  
+  div(class = "step-section",
+      h3("HiPerGator File Access", style = "text-align: center; margin-bottom: 20px;"),
+      uiOutput("auth_status"),
+      conditionalPanel(
+        condition = "!output.authenticated",
+        div(class = "login-box",
+            h4("Login for HiPerGator File Access"),
+            p("Enter your group credentials to browse HiPerGator files:"),
+            fluidRow(
+              column(6, textInput("group_name", "HiperGator Group",
+                                  placeholder = "e.g., cancercenter-dept",
+                                  value = "cancercenter-dept")),
+              column(6, passwordInput("group_password", "Password"))
+            ),
+            actionButton("login_btn", "Login", class = "btn-primary")
+        )
+      ),
+      conditionalPanel(
+        condition = "output.authenticated",
+        div(style = "text-align: right;",
+            actionButton("logout_btn", "Logout", class = "btn-secondary btn-sm")
+        )
+      )
+  ),
+  
+  div(class = "step-section",
+      h2("Required Parameters", style = "text-align: center; margin-bottom: 30px;"),
+      
+      div(class = "param-group",
+          h4("Basic Configuration"),
+          fluidRow(
+            column(6, textInput("project_id", "Project ID",
+                                placeholder = "RCHACV_analysis")),
+            column(6, textInput("output_dir", "Output Directory",
+                                placeholder = "/blue/your-group/path/to/output"))
+          )
+      ),
+      
+      div(class = "param-group",
+          h4("Input Files"),
+          
+          h5("BigWig Files", tags$span("*", style = "color: red;")),
+          p("Select multiple BigWig files for analysis:"),
+          conditionalPanel(
+            condition = "output.authenticated",
+            textInput("custom_path_bigwig", "Directory Path:", value = "",
+                      placeholder = "Enter path relative to volume..."),
+            shinyFilesButton("browse_bigwig", "Browse BigWig Files",
+                             "Select multiple BigWig files", class = "btn-info", multiple = TRUE),
+            uiOutput("selected_bigwig_files")
+          ),
+          conditionalPanel(
+            condition = "!output.authenticated",
+            div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
+                tags$i(class = "fa fa-lock"), " Login above to browse HiPerGator files"
+            )
+          ),
+          
+          br(),
+          
+          h5("Regions File (BED format)", tags$span("*", style = "color: red;")),
+          p("Select the BED file containing regions of interest:"),
+          conditionalPanel(
+            condition = "output.authenticated",
+            textInput("custom_path_regions", "Directory Path:", value = "",
+                      placeholder = "Enter path relative to volume..."),
+            shinyFilesButton("browse_regions", "Browse Regions File",
+                             "Select BED file", class = "btn-info", multiple = FALSE),
+            uiOutput("selected_regions_file")
+          ),
+          conditionalPanel(
+            condition = "!output.authenticated",
+            div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
+                tags$i(class = "fa fa-lock"), " Login above to browse HiPerGator files"
+            )
+          )
+      )
+  ),
+  
+  div(class = "step-section",
+      h2("Analysis Parameters", style = "text-align: center; margin-bottom: 30px;"),
+      
+      div(class = "param-group",
+          h4("computeMatrix Parameters"),
+          fluidRow(
+            column(4, selectInput("reference_point", "Reference Point",
+                                  choices = list("TSS" = "TSS", "TES" = "TES", "center" = "center"),
+                                  selected = "TSS")),
+            column(4, numericInput("before_region", "Base pairs before (-b)",
+                                   value = 2000, min = 0)),
+            column(4, numericInput("after_region", "Base pairs after (-a)",
+                                   value = 2000, min = 0))
+          ),
+          fluidRow(
+            column(4, checkboxInput("skip_zeros", "Skip zeros", value = TRUE)),
+            column(4, checkboxInput("missing_data_as_zero", "Missing data as zero", value = TRUE)),
+            column(4, selectInput("processors", "Processors",
+                                  choices = list("1" = "1", "2" = "2", "4" = "4", "8" = "8", "max" = "max"),
+                                  selected = "max"))
+          ),
+          fluidRow(
+            column(4, selectInput("reference_point", "Reference Point",
+                                  choices = list("TSS" = "TSS", "TES" = "TES", "center" = "center"),
+                                  selected = "TSS")),
+            column(4, numericInput("before_region", "Base pairs before (-b)",
+                                   value = 2000, min = 0)),
+            column(4, numericInput("after_region", "Base pairs after (-a)",
+                                   value = 2000, min = 0))
+          ),
+          fluidRow(
+            column(6, numericInput("y_min", "Y-axis minimum", value = 0, step = 0.1)),
+            column(6, numericInput("y_max", "Y-axis maximum", value = 1.5, step = 0.1))
+          ),
+          fluidRow(
+            column(4, numericInput("chunk_size", "Chunk size (regions per chunk)",
+                                   value = 5000, min = 1000, max = 20000,
+                                   help = "Split large BED files into smaller chunks for faster processing")),
+            column(4, checkboxInput("skip_zeros", "Skip zeros", value = TRUE)),
+            column(4, checkboxInput("missing_data_as_zero", "Missing data as zero", value = TRUE))
+          )
+      ),
+      
+      div(class = "param-group",
+          h4("plotHeatmap Parameters"),
+          fluidRow(
+            column(6, numericInput("heatmap_width", "Heatmap Width",
+                                   value = 6, min = 1, max = 20)),
+            column(6, textInput("x_axis_label", "X-axis Label",
+                                value = "distance (bp)"))
+          ),
+          fluidRow(
+            column(6, textInput("y_axis_label", "Y-axis Label", value = "Genes")),
+            column(6, textInput("regions_label", "Regions Label", value = "ATAC"))
+          ),
+          fluidRow(
+            column(6, textInput("color_list", "Color List (comma-separated)",
+                                value = "white,red")),
+            column(6, selectInput("sort_using", "Sort Using",
+                                  choices = list("mean" = "mean", "median" = "median",
+                                                 "max" = "max", "min" = "min", "sum" = "sum"),
+                                  selected = "mean"))
+          ),
+          textAreaInput("sample_labels", "Sample Labels (one per line, in order of BigWig files)",
+                        placeholder = "Sample1\nSample2\nSample3", rows = 4)
+      )
+  ),
+  div(class = "step-section",
+      h2("Computational Resources", style = "text-align: center; margin-bottom: 30px;"),
+      div(class = "param-group",
+          h4("Execution Method"),
+          radioButtons("execution_method", "Choose execution method:",
+                       choices = list(
+                         "Direct execution" = "direct",
+                         "Submit SLURM job" = "sbatch"
+                       ),
+                       selected = "direct"),
+          conditionalPanel(
+            condition = "input.execution_method == 'sbatch'",
+            fluidRow(
+              column(4, numericInput("sbatch_cpus", "CPUs", value = 8, min = 1, max = 32)),
+              column(4, textInput("sbatch_memory", "Memory", value = "32G")),
+              column(4, textInput("sbatch_time", "Time Limit", value = "4:00:00"))
+            ),
+            fluidRow(
+              column(4, textInput("sbatch_partition", "Partition", value = "hpg-default")),
+              column(4, textInput("sbatch_account", "Account",
+                                  placeholder = "your-group", value = "")),
+              column(4, checkboxInput("use_burst", "Use burst QoS (-b)", value = FALSE))
+            ),
+            textInput("user_email", "Email for notifications",
+                      placeholder = "your.email@ufl.edu")
+          )
+      )
+  ),
+  
+  div(class = "step-section",
+      h2("Generate and Run Analysis", style = "text-align: center; margin-bottom: 30px;"),
+      div(style = "text-align: center;",
+          actionButton("validate_params", "Validate Parameters", class = "btn-secondary btn-lg"),
+          br(), br(),
+          actionButton("run_analysis", "Run Analysis", class = "btn-success btn-lg", disabled = TRUE),
+          br(), br(),
+          downloadButton("download_script", "Download Script", class = "btn-info btn-lg", disabled = TRUE),
+          br(), br(),
+          downloadButton("save_params", "Save Parameters", class = "btn-warning btn-lg")
+      ),
+      br(),
+      uiOutput("validation_status"),
+      br(),
+      verbatimTextOutput("script_preview"),
+      br(),
+      uiOutput("analysis_status"),
+      br(),
+      uiOutput("output_files")
+  )
+)
+
+server <- function(input, output, session) {
+  
+  values <- reactiveValues(
+    authenticated = FALSE,
+    volume_root = NULL,
+    selected_bigwig_files = NULL,
+    selected_regions_file = NULL,
+    analysis_running = FALSE,
+    process = NULL,
+    output_dir = NULL
+  )
+  
+  observeEvent(input$login_btn, {
+    if(input$group_name != "" && input$group_password != "") {
+      volume_root <- paste0("/blue/", input$group_name)
+      if(dir.exists(volume_root)) {
+        values$authenticated <- TRUE
+        values$volume_root <- volume_root
+        
+        shinyFileChoose(input, "browse_bigwig",
+                       roots = setNames(volume_root, input$group_name),
+                       filetypes = c("bw", "bigwig"))
+        
+        shinyFileChoose(input, "browse_regions",
+                       roots = setNames(volume_root, input$group_name),
+                       filetypes = c("bed", "txt", "csv"))
+        
+        showNotification("Successfully authenticated!", type = "message")
+      } else {
+        showNotification("Authentication failed or directory not accessible!", type = "error")
+      }
+    }
+  })
+  
+  observeEvent(input$logout_btn, {
+    values$authenticated <- FALSE
+    values$volume_root <- NULL
+    values$selected_bigwig_files <- NULL
+    values$selected_regions_file <- NULL
+  })
+  
+  output$authenticated <- reactive({
+    values$authenticated
+  })
+  outputOptions(output, "authenticated", suspendWhenHidden = FALSE)
+  
+  output$auth_status <- renderUI({
+    if(values$authenticated) {
+      div(class = "auth-status auth-success",
+          tags$i(class = "fa fa-check-circle"),
+          " Authenticated for group:", strong(input$group_name))
+    } else {
+      div(class = "auth-status auth-needed",
+          tags$i(class = "fa fa-exclamation-circle"),
+          " Please login to browse HiPerGator files")
+    }
+  })
+  
+  observeEvent(input$browse_bigwig, {
+    if(!is.null(input$browse_bigwig)) {
+      files <- parseFilePaths(setNames(values$volume_root, input$group_name), input$browse_bigwig)
+      if(nrow(files) > 0) {
+        values$selected_bigwig_files <- as.character(files$datapath)
+      }
+    }
+  })
+  
+  observeEvent(input$browse_regions, {
+    if(!is.null(input$browse_regions)) {
+      files <- parseFilePaths(setNames(values$volume_root, input$group_name), input$browse_regions)
+      if(nrow(files) > 0) {
+        values$selected_regions_file <- as.character(files$datapath)
+      }
+    }
+  })
+  
+  output$selected_bigwig_files <- renderUI({
+    if(!is.null(values$selected_bigwig_files) && length(values$selected_bigwig_files) > 0) {
+      div(
+        h6(paste("Selected", length(values$selected_bigwig_files), "BigWig files:")),
+        div(class = "selected-file",
+            paste(basename(values$selected_bigwig_files), collapse = "\n"))
+      )
+    }
+  })
+  
+  output$selected_regions_file <- renderUI({
+    if(!is.null(values$selected_regions_file)) {
+      div(
+        h6("Selected regions file:"),
+        div(class = "selected-file", basename(values$selected_regions_file))
+      )
+    }
+  })
+  
+  observe({
+    if(values$authenticated && input$sbatch_account == "") {
+      updateTextInput(session, "sbatch_account", value = input$group_name)
+    }
+  })
+  
+  observeEvent(input$validate_params, {
+    errors <- c()
+    warnings <- c()
+    
+    if(is.null(values$selected_bigwig_files) || length(values$selected_bigwig_files) == 0) {
+      errors <- c(errors, "No BigWig files selected")
+    }
+    
+    if(is.null(values$selected_regions_file)) {
+      errors <- c(errors, "No regions file selected")
+    }
+    
+    if(input$project_id == "" || is.null(input$project_id)) {
+      errors <- c(errors, "Project ID is required")
+    }
+    
+    if(input$output_dir == "" || is.null(input$output_dir)) {
+      errors <- c(errors, "Output directory is required")
+    }
+    
+    if(input$execution_method == "sbatch") {
+      if(input$sbatch_account == "" || is.null(input$sbatch_account)) {
+        errors <- c(errors, "Account is required for SLURM submission")
+      }
+      if(input$user_email == "" || is.null(input$user_email)) {
+        warnings <- c(warnings, "Email is recommended for job notifications")
+      }
+    }
+    
+    if(input$sample_labels != "") {
+      labels <- trimws(unlist(strsplit(input$sample_labels, "\n")))
+      labels <- labels[labels != ""]
+      if(length(labels) != length(values$selected_bigwig_files)) {
+        warnings <- c(warnings, paste("Number of sample labels (", length(labels),
+                                    ") doesn't match number of BigWig files (",
+                                    length(values$selected_bigwig_files), ")"))
+      }
+    }
+    
+    if(length(errors) == 0) {
+      shinyjs::enable("run_analysis")
+      shinyjs::enable("download_script") 
+      shinyjs::enable("save_params")  # Add this line
+    } else {
+      shinyjs::disable("run_analysis")
+      shinyjs::disable("download_script")
+      shinyjs::disable("save_params")  # And this line
+    }
+    
+    output$validation_status <- renderUI({
+      if(length(errors) > 0) {
+        div(class = "validation-message validation-error",
+            tags$strong("Errors:"),
+            tags$ul(lapply(errors, tags$li)))
+      } else if(length(warnings) > 0) {
+        div(class = "validation-message validation-warning",
+            tags$strong("Warnings:"),
+            tags$ul(lapply(warnings, tags$li)))
+      } else {
+        div(class = "validation-message validation-success",
+            tags$i(class = "fa fa-check"), " All parameters validated successfully!")
+      }
+    })
+  })
+  
+  generate_script_from_template <- function(template_file) {
+    if(!file.exists(template_file)) {
+      return("Error: Template file not found")
+    }
+    
+    template_content <- readLines(template_file)
+    
+    sample_labels_str <- ""
+    if(input$sample_labels != "") {
+      labels <- trimws(unlist(strsplit(input$sample_labels, "\n")))
+      labels <- labels[labels != ""]
+      if(length(labels) == length(values$selected_bigwig_files)) {
+        sample_labels_str <- paste(labels, collapse = '" "')
+      } else {
+        sample_labels_str <- paste(basename(values$selected_bigwig_files), collapse = '" "')
+      }
+    } else {
+      sample_labels_str <- paste(basename(values$selected_bigwig_files), collapse = '" "')
+    }
+    
+    skip_zeros_param <- ifelse(input$skip_zeros, "--skipZeros", "")
+    missing_data_param <- ifelse(input$missing_data_as_zero, "--missingDataAsZero", "")
+    
+    script_content <- template_content
+    script_content <- gsub("{{PROJECT_ID}}", input$project_id, script_content, fixed = TRUE)
+    script_content <- gsub("{{Y_MIN}}", as.character(input$y_min), script_content, fixed = TRUE)
+    script_content <- gsub("{{Y_MAX}}", as.character(input$y_max), script_content, fixed = TRUE)
+    script_content <- gsub("{{OUTPUT_DIR}}", input$output_dir, script_content, fixed = TRUE)
+    script_content <- gsub("{{REGIONS_FILE}}", values$selected_regions_file, script_content, fixed = TRUE)
+    script_content <- gsub("{{BIGWIG_FILES}}", paste(paste0('"', values$selected_bigwig_files, '"'), collapse = " "), script_content, fixed = TRUE)
+    script_content <- gsub("{{REFERENCE_POINT}}", input$reference_point, script_content, fixed = TRUE)
+    script_content <- gsub("{{BEFORE_REGION}}", as.character(input$before_region), script_content, fixed = TRUE)
+    script_content <- gsub("{{AFTER_REGION}}", as.character(input$after_region), script_content, fixed = TRUE)
+    script_content <- gsub("{{PROCESSORS}}", input$processors, script_content, fixed = TRUE)
+    script_content <- gsub("{{SKIP_ZEROS}}", skip_zeros_param, script_content, fixed = TRUE)
+    script_content <- gsub("{{MISSING_DATA_AS_ZERO}}", missing_data_param, script_content, fixed = TRUE)
+    script_content <- gsub("{{HEATMAP_WIDTH}}", as.character(input$heatmap_width), script_content, fixed = TRUE)
+    script_content <- gsub("{{SAMPLE_LABELS}}", sample_labels_str, script_content, fixed = TRUE)
+    script_content <- gsub("{{X_AXIS_LABEL}}", input$x_axis_label, script_content, fixed = TRUE)
+    script_content <- gsub("{{Y_AXIS_LABEL}}", input$y_axis_label, script_content, fixed = TRUE)
+    script_content <- gsub("{{REGIONS_LABEL}}", input$regions_label, script_content, fixed = TRUE)
+    script_content <- gsub("{{COLOR_LIST}}", input$color_list, script_content, fixed = TRUE)
+    script_content <- gsub("{{SORT_USING}}", input$sort_using, script_content, fixed = TRUE)
+    script_content <- gsub("{{CPUS}}", as.character(input$sbatch_cpus), script_content, fixed = TRUE)
+    script_content <- gsub("{{MEMORY}}", input$sbatch_memory, script_content, fixed = TRUE)
+    script_content <- gsub("{{TIME}}", input$sbatch_time, script_content, fixed = TRUE)
+    script_content <- gsub("{{PARTITION}}", input$sbatch_partition, script_content, fixed = TRUE)
+    script_content <- gsub("{{ACCOUNT}}", input$sbatch_account, script_content, fixed = TRUE)
+    qos_value <- if(input$use_burst) paste0(input$sbatch_account, "-b") else ""
+    script_content <- gsub("{{QOS}}", qos_value, script_content, fixed = TRUE)
+    script_content <- gsub("{{USER_EMAIL}}", input$user_email, script_content, fixed = TRUE)
+    script_content <- gsub("{{CHUNK_SIZE}}", as.character(input$chunk_size), script_content, fixed = TRUE)
+    
+    return(paste(script_content, collapse = "\n"))
+  }
+  
+  output$script_preview <- renderText({
+    # Don't generate preview until we have required inputs
+    if(is.null(values$selected_bigwig_files) || 
+       is.null(values$selected_regions_file) ||
+       input$project_id == "" ||
+       input$output_dir == "") {
+      return("Please complete the required parameters above to see script preview.")
+    }
+    
+    if(input$execution_method == "direct") {
+      generate_script_from_template("templates/script.bash")
+    } else {
+      generate_script_from_template("templates/slurm.sbatch")
+    }
+  })
+  
+  output$download_script <- downloadHandler(
+    filename = function() {
+      if(input$execution_method == "direct") {
+        paste0(input$project_id, "_tornado_analysis.sh")
+      } else {
+        paste0(input$project_id, "_tornado_analysis.sbatch")
+      }
+    },
+    content = function(file) {
+      if(input$execution_method == "direct") {
+        script_content <- generate_script_from_template("templates/script.bash")
+      } else {
+        script_content <- generate_script_from_template("templates/slurm.sbatch")
+      }
+      writeLines(script_content, file)
+    }
+  )
+  
+  observeEvent(input$run_analysis, {
+    if(values$analysis_running) {
+      showNotification("Analysis already running!", type = "warning")
+      return()
+    }
+    
+    values$analysis_running <- TRUE
+    values$output_dir <- file.path(input$output_dir, input$project_id)
+    
+    if(!dir.exists(values$output_dir)) {
+      dir.create(values$output_dir, recursive = TRUE)
+    }
+    
+    if(input$execution_method == "direct") {
+      script_content <- generate_script_from_template("templates/script.bash")
+      script_file <- file.path(values$output_dir, "tornado_analysis.sh")
+      writeLines(script_content, script_file)
+      Sys.chmod(script_file, mode = "0755")
+      
+      values$process <- process$new(
+        command = "bash",
+        args = c(script_file),
+        stdout = "|",
+        stderr = "|",
+        cleanup = TRUE
+      )
+      
+      showNotification("Analysis started! Running directly...", type = "message")
+      
+    } else {
+      script_content <- generate_script_from_template("templates/slurm.sbatch")
+      script_file <- file.path(values$output_dir, "tornado_analysis.sbatch")
+      writeLines(script_content, script_file)
+      
+      result <- system2("sbatch", args = script_file, stdout = TRUE, stderr = TRUE)
+      
+      if(length(result) > 0 && grepl("Submitted batch job", result[1])) {
+        job_id <- gsub(".*job ([0-9]+).*", "\\1", result[1])
+        showNotification(paste("Job submitted successfully! Job ID:", job_id), type = "message")
+        values$analysis_running <- FALSE
+      } else {
+        showNotification("Job submission failed!", type = "error")
+        values$analysis_running <- FALSE
+      }
+    }
+  })
+  
+  observe({
+    if(!is.null(values$process) && values$analysis_running) {
+      if(!values$process$is_alive()) {
+        exit_status <- values$process$get_exit_status()
+        stdout <- values$process$read_output_lines()
+        stderr <- values$process$read_error_lines()
+        
+        values$analysis_running <- FALSE
+        
+        if(exit_status == 0) {
+          showNotification("Analysis completed successfully!", type = "message")
+        } else {
+          showNotification(paste("Analysis failed with exit code:", exit_status), type = "error")
+        }
+        
+        values$process <- NULL
+      }
+      
+      invalidateLater(2000)
+    }
+  })
+  
+  output$analysis_status <- renderUI({
+    if(values$analysis_running) {
+      div(class = "validation-message validation-warning",
+          tags$i(class = "fa fa-spinner fa-spin"),
+          " Analysis in progress...")
+    } else if(!is.null(values$output_dir) && dir.exists(values$output_dir)) {
+      div(class = "validation-message validation-success",
+          tags$i(class = "fa fa-check"),
+          " Analysis directory created: ", tags$code(values$output_dir))
+    }
+  })
+  
+  output$output_files <- renderUI({
+    if(!is.null(values$output_dir) && dir.exists(values$output_dir)) {
+      expected_files <- c(
+        paste0(input$project_id, "_matrix.gz"),
+        paste0(input$project_id, "_heatmap.png"),
+        paste0(input$project_id, "_sorted.bed")
+      )
+      
+      existing_files <- list.files(values$output_dir, pattern = paste(expected_files, collapse = "|"))
+      
+      if(length(existing_files) > 0) {
+        div(
+          h4("Generated Files:"),
+          tags$ul(
+            lapply(existing_files, function(f) {
+              tags$li(
+                tags$code(f), " - ",
+                downloadLink(paste0("download_", gsub("[^a-zA-Z0-9]", "_", f)),
+                             "Download",
+                             class = "btn btn-sm btn-info")
+              )
+            })
+          ),
+          br(),
+          div(class = "validation-message validation-success",
+              tags$strong("Output Location: "),
+              tags$code(values$output_dir))
+        )
+      } else {
+        div(
+          h4("Expected Output Files:"),
+          tags$ul(
+            lapply(expected_files, function(f) {
+              tags$li(tags$code(f), " - ",
+                      tags$span("Not yet generated", style = "color: #856404;"))
+            })
+          )
+        )
+      }
+    }
+  })
+  # Add these anywhere in your server function after the existing observers:
+  
+  # Save parameters
+  output$save_params <- downloadHandler(
+    filename = function() {
+      paste0(ifelse(input$project_id != "", input$project_id, "tornado_params"), "_", 
+             format(Sys.time(), "%Y%m%d_%H%M%S"), ".json")
+    },
+    content = function(file) {
+      params <- list(
+        project_id = input$project_id,
+        output_dir = input$output_dir,
+        selected_bigwig_files = values$selected_bigwig_files,
+        selected_regions_file = values$selected_regions_file,
+        reference_point = input$reference_point,
+        before_region = input$before_region,
+        after_region = input$after_region,
+        chunk_size = input$chunk_size,
+        skip_zeros = input$skip_zeros,
+        missing_data_as_zero = input$missing_data_as_zero,
+        processors = input$processors,
+        heatmap_width = input$heatmap_width,
+        x_axis_label = input$x_axis_label,
+        y_axis_label = input$y_axis_label,
+        regions_label = input$regions_label,
+        color_list = input$color_list,
+        sort_using = input$sort_using,
+        sample_labels = input$sample_labels,
+        y_min = input$y_min,
+        y_max = input$y_max,
+        execution_method = input$execution_method,
+        sbatch_cpus = input$sbatch_cpus,
+        sbatch_memory = input$sbatch_memory,
+        sbatch_time = input$sbatch_time,
+        sbatch_partition = input$sbatch_partition,
+        sbatch_account = input$sbatch_account,
+        use_burst = input$use_burst,
+        user_email = input$user_email
+      )
+      jsonlite::write_json(params, file, pretty = TRUE)
+    }
+  )
+  
+  # Load parameters
+  observeEvent(input$load_params, {
+    if(is.null(input$load_params)) return()
+    
+    tryCatch({
+      params <- jsonlite::read_json(input$load_params$datapath)
+      
+      # Update all inputs
+      updateTextInput(session, "project_id", value = params$project_id %||% "")
+      updateTextInput(session, "output_dir", value = params$output_dir %||% "")
+      updateSelectInput(session, "reference_point", selected = params$reference_point %||% "TSS")
+      updateNumericInput(session, "before_region", value = params$before_region %||% 2000)
+      updateNumericInput(session, "after_region", value = params$after_region %||% 2000)
+      updateNumericInput(session, "chunk_size", value = params$chunk_size %||% 5000)
+      updateCheckboxInput(session, "skip_zeros", value = params$skip_zeros %||% TRUE)
+      updateCheckboxInput(session, "missing_data_as_zero", value = params$missing_data_as_zero %||% TRUE)
+      updateSelectInput(session, "processors", selected = params$processors %||% "max")
+      updateNumericInput(session, "heatmap_width", value = params$heatmap_width %||% 6)
+      updateTextInput(session, "x_axis_label", value = params$x_axis_label %||% "distance (bp)")
+      updateTextInput(session, "y_axis_label", value = params$y_axis_label %||% "Genes")
+      updateTextInput(session, "regions_label", value = params$regions_label %||% "ATAC")
+      updateTextInput(session, "color_list", value = params$color_list %||% "white,red")
+      updateSelectInput(session, "sort_using", selected = params$sort_using %||% "mean")
+      updateTextAreaInput(session, "sample_labels", value = params$sample_labels %||% "")
+      updateNumericInput(session, "y_min", value = params$y_min %||% 0)
+      updateNumericInput(session, "y_max", value = params$y_max %||% 1.5)
+      updateRadioButtons(session, "execution_method", selected = params$execution_method %||% "direct")
+      updateNumericInput(session, "sbatch_cpus", value = params$sbatch_cpus %||% 8)
+      updateTextInput(session, "sbatch_memory", value = params$sbatch_memory %||% "32G")
+      updateTextInput(session, "sbatch_time", value = params$sbatch_time %||% "4:00:00")
+      updateTextInput(session, "sbatch_partition", value = params$sbatch_partition %||% "hpg-default")
+      updateTextInput(session, "sbatch_account", value = params$sbatch_account %||% "")
+      updateCheckboxInput(session, "use_burst", value = params$use_burst %||% FALSE)
+      updateTextInput(session, "user_email", value = params$user_email %||% "")
+      
+      # Restore file selections
+      values$selected_bigwig_files <- params$selected_bigwig_files
+      values$selected_regions_file <- params$selected_regions_file
+      
+      showNotification("Parameters loaded successfully!", type = "success")
+    }, error = function(e) {
+      showNotification(paste("Error loading parameters:", e$message), type = "error")
+    })
+  })
+  
+  observe({
+    # Add this check at the very beginning
+    if(is.null(values$output_dir) || !dir.exists(values$output_dir)) {
+      return()
+    }
+    
+    files <- list.files(values$output_dir, full.names = TRUE)
+    if(length(files) > 0) {
+      for(i in seq_along(files)) {
+        file_path <- files[i]
+        file_name <- basename(file_path)
+        # Make sure handler_id is never empty
+        handler_id <- paste0("download_", gsub("[^a-zA-Z0-9]", "_", file_name))
+        if(handler_id == "download_" || nchar(handler_id) <= 9) {
+          next  # skip if the handler_id would be invalid
+        }
+        
+        local({
+          local_file_path <- file_path
+          local_file_name <- file_name
+          output[[handler_id]] <- downloadHandler(
+            filename = function() local_file_name,
+            content = function(file) {
+              file.copy(local_file_path, file)
+            }
+          )
+        })
+      }
+    }
+  })
+}
+
+shinyApp(ui = ui, server = server)
