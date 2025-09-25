@@ -231,9 +231,10 @@ ui <- fluidPage(
             column(6, numericInput("y_max", "Y-axis maximum", value = 1.5, step = 0.1))
           ),
           fluidRow(
-            column(4, numericInput("chunk_size", "Chunk size (regions per chunk)",
-                                   value = 5000, min = 1000, max = 20000,
-                                   help = "Split large BED files into smaller chunks for faster processing")),
+            column(4, 
+                   numericInput("chunk_size", "Chunk size (regions per chunk)",
+                                value = 5000, min = 1000, max = 20000),
+                   helpText("Split large BED files into smaller chunks for faster processing")),
             column(4, checkboxInput("skip_zeros", "Skip zeros", value = TRUE)),
             column(4, checkboxInput("missing_data_as_zero", "Missing data as zero", value = TRUE))
           )
@@ -484,24 +485,33 @@ server <- function(input, output, session) {
     if(!file.exists(template_file)) {
       return("Error: Template file not found")
     }
-    
     template_content <- readLines(template_file)
-    
     sample_labels_str <- ""
     if(input$sample_labels != "") {
       labels <- trimws(unlist(strsplit(input$sample_labels, "\n")))
       labels <- labels[labels != ""]
       if(length(labels) == length(values$selected_bigwig_files)) {
-        sample_labels_str <- paste(labels, collapse = '" "')
+        sample_labels_str <- paste0('"', paste(labels, collapse = '" "'), '"')
       } else {
-        sample_labels_str <- paste(basename(values$selected_bigwig_files), collapse = '" "')
+        sample_labels_str <- paste0('"', paste(basename(values$selected_bigwig_files), collapse = '" "'), '"')
       }
     } else {
-      sample_labels_str <- paste(basename(values$selected_bigwig_files), collapse = '" "')
+      sample_labels_str <- paste0('"', paste(basename(values$selected_bigwig_files), collapse = '" "'), '"')
     }
-    
     skip_zeros_param <- ifelse(input$skip_zeros, "--skipZeros", "")
     missing_data_param <- ifelse(input$missing_data_as_zero, "--missingDataAsZero", "")
+    
+    # Handle QoS line
+    qos_line <- ""
+    if(input$use_burst && input$sbatch_account != "") {
+      qos_line <- paste0("#SBATCH --qos=", input$sbatch_account, "-b")
+    }
+    
+    # Handle email lines  
+    email_lines <- ""
+    if(input$user_email != "") {
+      email_lines <- paste0("#SBATCH --mail-user=", input$user_email, "\n#SBATCH --mail-type=ALL")
+    }
     
     script_content <- template_content
     script_content <- gsub("{{PROJECT_ID}}", input$project_id, script_content, fixed = TRUE)
@@ -528,9 +538,8 @@ server <- function(input, output, session) {
     script_content <- gsub("{{TIME}}", input$sbatch_time, script_content, fixed = TRUE)
     script_content <- gsub("{{PARTITION}}", input$sbatch_partition, script_content, fixed = TRUE)
     script_content <- gsub("{{ACCOUNT}}", input$sbatch_account, script_content, fixed = TRUE)
-    qos_value <- if(input$use_burst) paste0(input$sbatch_account, "-b") else ""
-    script_content <- gsub("{{QOS}}", qos_value, script_content, fixed = TRUE)
-    script_content <- gsub("{{USER_EMAIL}}", input$user_email, script_content, fixed = TRUE)
+    script_content <- gsub("{{QOS_LINE}}", qos_line, script_content, fixed = TRUE)
+    script_content <- gsub("{{EMAIL_LINES}}", email_lines, script_content, fixed = TRUE)
     script_content <- gsub("{{CHUNK_SIZE}}", as.character(input$chunk_size), script_content, fixed = TRUE)
     
     return(paste(script_content, collapse = "\n"))
@@ -774,7 +783,7 @@ server <- function(input, output, session) {
       values$selected_bigwig_files <- params$selected_bigwig_files
       values$selected_regions_file <- params$selected_regions_file
       
-      showNotification("Parameters loaded successfully!", type = "success")
+      showNotification("Parameters loaded successfully!", type = "message")
     }, error = function(e) {
       showNotification(paste("Error loading parameters:", e$message), type = "error")
     })
