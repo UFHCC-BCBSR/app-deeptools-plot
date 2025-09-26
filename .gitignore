@@ -2,5 +2,4 @@ logs/
 output/*
 LOGS/
 *gz
-*bed
-test-beds/
+my-beds/
