@@ -34,6 +34,7 @@ X_LABEL="{{X_AXIS_LABEL_PROFILE}}"
 Y_LABEL="{{Y_AXIS_LABEL_PROFILE}}"
 PLOT_WIDTH={{PLOT_WIDTH}}
 PLOT_HEIGHT={{PLOT_HEIGHT}}
+PLOT_TITLE="{{PLOT_TITLE_PROFILE}}"
 
 # Create output directory and logs directory
 mkdir -p $OUTPUT_DIR/logs
@@ -143,7 +144,7 @@ plotProfile \
     -o $PROFILE_OUTPUT \
     --samplesLabel {{SAMPLE_LABELS_OVERLAY}} \
     --colors {{SAMPLE_COLORS_OVERLAY}} \
-    --plotTitle "Grouped Profile Plot" \
+    --plotTitle "$PLOT_TITLE" \
     --plotWidth $PLOT_WIDTH \
     --plotHeight $PLOT_HEIGHT \
     --yAxisLabel "$Y_LABEL" \

@@ -1,7 +1,6 @@
 logs/
 output/*
 LOGS/
-*sbatch
 *gz
 *bed
 test-beds/

@@ -97,7 +97,7 @@ ui <- fluidPage(
     "))
   ),
   div(class = "title-section",
-      h1("DeepTools Analysis Generator",
+      h1("DeepTools Plot Generator",
          style = "margin: 0; font-size: 48px; font-weight: 300;"),
       p("Generate heatmaps and profile plots from BigWig files using computeMatrix and plotHeatmap/plotProfile",
         style = "margin: 10px 0 0 0; font-size: 14px; opacity: 0.8;")
@@ -264,13 +264,18 @@ ui <- fluidPage(
             fluidRow(
               column(6, textInput("x_axis_label_profile", "X-axis Label",
                                   value = "distance (bp)")),
-              column(6, textInput("y_axis_label_profile", "Y-axis Label", value = "mean RPKM"))
+              column(6, textInput("y_axis_label_profile", "Y-axis Label", value = "mean CPM"))
             ),
             fluidRow(
               column(6, numericInput("plot_width", "Plot Width",
                                      value = 8, min = 4, max = 20)),
               column(6, numericInput("plot_height", "Plot Height",
                                      value = 6, min = 4, max = 15))
+            ),
+            fluidRow(
+              column(12, textInput("plot_title_profile", "Plot Title",
+                                   value = "Profile Plot",
+                                   placeholder = "Enter title for the profile plot"))
             )
         )
       )
@@ -761,22 +766,21 @@ server <- function(input, output, session) {
       script_content <- gsub("{{Y_AXIS_LABEL_PROFILE}}", input$y_axis_label_profile, script_content, fixed = TRUE)
       script_content <- gsub("{{PLOT_WIDTH}}", as.character(input$plot_width), script_content, fixed = TRUE)
       script_content <- gsub("{{PLOT_HEIGHT}}", as.character(input$plot_height), script_content, fixed = TRUE)
+      script_content <- gsub("{{PLOT_TITLE_PROFILE}}", input$plot_title_profile, script_content, fixed = TRUE)
       
-      # Process sample groups for plotting using the processed sample info
       if(!is.null(values$processed_sample_info)) {
-        # Create strings for substitution
-        sample_labels_str <- paste(values$processed_sample_info$sample, collapse = " ")
-        sample_colors_str <- paste(tolower(values$processed_sample_info$color), collapse = " ")  # Convert to lowercase
+        # Use sample_label if available, otherwise fall back to sample
+        if("sample_label" %in% colnames(values$processed_sample_info)) {
+          sample_labels_str <- paste(values$processed_sample_info$sample_label, collapse = " ")
+        } else {
+          sample_labels_str <- paste(values$processed_sample_info$sample, collapse = " ")
+        }
+        
+        sample_colors_str <- paste(tolower(values$processed_sample_info$color), collapse = " ")
         
         # Substitute into template
         script_content <- gsub("{{SAMPLE_LABELS_OVERLAY}}", sample_labels_str, script_content, fixed = TRUE)
-        script_content <- gsub("{{SAMPLE_COLORS_OVERLAY}}", sample_colors_str, script_content, fixed = TRUE)
-        
-        # Create sample groups string for the template
-        sample_groups_str <- paste(apply(values$processed_sample_info, 1, function(row) {
-          paste(row[1], row[2], row[3], sep = ",")
-        }), collapse = "\\n")
-        script_content <- gsub("{{SAMPLE_GROUPS}}", sample_groups_str, script_content, fixed = TRUE)
+        script_content <- gsub("{{SAMPLE_COLORS_OVERLAY}}", sample_colors_str, script_content, fixed = TRUE)  
       }
     }
     
@@ -927,6 +931,7 @@ server <- function(input, output, session) {
         processors = input$processors,
         y_min = input$y_min,
         y_max = input$y_max,
+        plot_title_profile = input$plot_title_profile,
         # Heatmap parameters
         heatmap_width = input$heatmap_width,
         x_axis_label = input$x_axis_label,
@@ -963,6 +968,7 @@ server <- function(input, output, session) {
       # Update all inputs with proper null checking
       updateTextInput(session, "project_id", value = params$project_id %||% "")
       updateTextInput(session, "output_dir", value = params$output_dir %||% "")
+      updateTextInput(session, "plot_title_profile", value = params$plot_title_profile %||% "Profile Plot")
       updateRadioButtons(session, "plot_type", selected = params$plot_type %||% "heatmap")
       updateSelectInput(session, "reference_point", selected = params$reference_point %||% "TSS")
       updateNumericInput(session, "before_region", value = params$before_region %||% 2000)
