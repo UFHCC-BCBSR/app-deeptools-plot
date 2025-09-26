@@ -121,21 +121,20 @@ ui <- fluidPage(
       conditionalPanel(
         condition = "!output.authenticated",
         div(class = "login-box",
-            h4("Login for HiPerGator File Access"),
-            p("Enter your group credentials to browse HiPerGator files:"),
+            h4("HiPerGator File Access"),
+            p("Enter your group name to browse HiPerGator files:"),
             fluidRow(
-              column(6, textInput("group_name", "HiperGator Group",
+              column(8, textInput("group_name", "HiperGator Group",
                                   placeholder = "e.g., cancercenter-dept",
                                   value = "cancercenter-dept")),
-              column(6, passwordInput("group_password", "Password"))
-            ),
-            actionButton("login_btn", "Login", class = "btn-primary")
+              column(4, br(), actionButton("login_btn", "Connect", class = "btn-primary"))
+            )
         )
       ),
       conditionalPanel(
         condition = "output.authenticated",
         div(style = "text-align: right;",
-            actionButton("logout_btn", "Logout", class = "btn-secondary btn-sm")
+            actionButton("logout_btn", "Disconnect", class = "btn-secondary btn-sm")
         )
       )
   ),
@@ -168,7 +167,7 @@ ui <- fluidPage(
           conditionalPanel(
             condition = "!output.authenticated",
             div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
-                tags$i(class = "fa fa-lock"), " Login above to browse HiPerGator files"
+                tags$i(class = "fa fa-lock"), " Connect to a group above to browse HiPerGator files"
             )
           ),
           br(),
@@ -459,7 +458,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$login_btn, {
-    if(input$group_name != "" && input$group_password != "") {
+    if(input$group_name != "") {
       volume_root <- paste0("/blue/", input$group_name)
       if(dir.exists(volume_root)) {
         values$authenticated <- TRUE
@@ -470,10 +469,12 @@ server <- function(input, output, session) {
         shinyFileChoose(input, "browse_regions",
                         roots = setNames(volume_root, input$group_name),
                         filetypes = c("bed", "txt", "csv"))
-        showNotification("Successfully authenticated!", type = "message")
+        showNotification("Successfully connected to group directory!", type = "message")
       } else {
-        showNotification("Authentication failed or directory not accessible!", type = "error")
+        showNotification("Group directory not found or not accessible!", type = "error")
       }
+    } else {
+      showNotification("Please enter a group name!", type = "warning")
     }
   })
   
@@ -493,11 +494,11 @@ server <- function(input, output, session) {
     if(values$authenticated) {
       div(class = "auth-status auth-success",
           tags$i(class = "fa fa-check-circle"),
-          " Authenticated for group:", strong(input$group_name))
+          " Connected to group:", strong(input$group_name))
     } else {
       div(class = "auth-status auth-needed",
           tags$i(class = "fa fa-exclamation-circle"),
-          " Please login to browse HiPerGator files")
+          " Please connect to a group to browse HiPerGator files")
     }
   })
   
