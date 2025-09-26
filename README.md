@@ -48,6 +48,7 @@ A Shiny application for generating heatmaps and profile plots from BigWig files 
 #### Regions File (BED format)
 - BED file containing genomic regions of interest
 - Used to define where to calculate signal (e.g., TSS regions, peaks)
+- See example mini region files that can be used in test-beds
 
 #### Sample Information File (CSV) - Required for Profile Plots
 \*\*Required columns:\*\*
@@ -92,7 +93,7 @@ RM1-048-T1_REP1,Control_d1,red,Control_d1
 
 ### Matrix Reuse Feature
 
-\*\*Important\*\*: If you use the \*\*same Project ID\*\* for multiple runs:
+\*\*Important\*\*: You can use the \*\*same Project ID\*\* for multiple runs:
 - The app will detect existing \`{PROJECT_ID}_matrix.gz\` files
 - \*\*computeMatrix step will be skipped\*\* (saves significant computation time)
 - New plots will be generated with timestamp suffixes
@@ -103,7 +104,7 @@ RM1-048-T1_REP1,Control_d1,red,Control_d1
 
 ### Manual Script Editing
 
-After running an analysis:
+If you want to add and customize plotProfile parameters not set in the app, after running an analysis:
 1. Find \`profile_analysis.sbatch\` (or \`heatmap_analysis.sbatch\`) in your output directory
 2. The script can be manually edited and re-submitted:
    \`\`\`bash
@@ -119,7 +120,6 @@ After running an analysis:
 ### Job Submission
 
 The app submits SLURM jobs to HiPerGator:
-- Jobs run in the background after submission
 - Check job status with: \`squeue -u $USER\`
 - Job logs are saved in \`{OUTPUT_DIR}/logs/\`
 - Email notifications (if provided) will alert you when jobs complete
@@ -143,8 +143,6 @@ All outputs are saved to: \`{OUTPUT_DIR}/{PROJECT_ID}/\`
 
 ### Common Issues
 - \*\*"No BigWig files matched"\*\*: Check that sample names in CSV partially match BigWig filenames
-- \*\*"Colors too small" error\*\*: Ensure each sample has a color assigned in the CSV
-- \*\*Authentication fails\*\*: Verify group name and password, check \`/blue/group-name/\` exists
 - \*\*Job submission fails\*\*: Check SLURM account name matches your group allocation
 
 ### File Matching
