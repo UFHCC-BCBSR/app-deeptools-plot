@@ -552,15 +552,16 @@ server <- function(input, output, session) {
     if(values$authenticated && input$custom_path_regions != "") {
       custom_root <- file.path(values$volume_root, input$custom_path_regions)
       if(dir.exists(custom_root)) {
-        values$current_regions_roots <- setNames(custom_root, basename(custom_root))
+        values$current_regions_roots <- setNames(custom_root, basename(custom_root))  # <- ADD THIS
         shinyFileChoose(input, "browse_regions",
-                        roots = values$current_regions_roots,
+                        roots = values$current_regions_roots,  # <- USE THE STORED VALUE
                         filetypes = c("bed", "txt", "csv"))
       } else {
         showNotification("Custom path does not exist!", type = "warning")
-        values$current_regions_roots <- setNames(values$volume_root, input$group_name)
+        # Reset to volume root
+        values$current_regions_roots <- setNames(values$volume_root, input$group_name)  # <- ADD THIS
         shinyFileChoose(input, "browse_regions",
-                        roots = values$current_regions_roots,
+                        roots = values$current_regions_roots,  # <- USE THE STORED VALUE
                         filetypes = c("bed", "txt", "csv"))
       }
     }
