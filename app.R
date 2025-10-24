@@ -466,22 +466,21 @@ server <- function(input, output, session) {
         values$authenticated <- TRUE
         values$volume_root <- volume_root
         
-        # Set initial roots
-        values$current_bigwig_roots <- setNames(volume_root, input$group_name)
+        # Initialize BOTH roots immediately
+        values$current_roots <- setNames(volume_root, input$group_name)
         values$current_regions_roots <- setNames(volume_root, input$group_name)
         
         shinyFileChoose(input, "browse_bigwig",
-                        roots = values$current_bigwig_roots,
+                        roots = values$current_roots,
                         filetypes = c("bw", "bigwig"))
         shinyFileChoose(input, "browse_regions",
                         roots = values$current_regions_roots,
                         filetypes = c("bed", "txt", "csv"))
+        
         showNotification("Successfully connected to group directory!", type = "message")
       } else {
         showNotification("Group directory not found or not accessible!", type = "error")
       }
-    } else {
-      showNotification("Please enter a group name!", type = "warning")
     }
   })
   
@@ -510,60 +509,129 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$browse_bigwig, {
-    if(!is.null(input$browse_bigwig) && !is.null(values$current_roots)) {
-      files <- parseFilePaths(values$current_roots, input$browse_bigwig)  # <- Use same roots!
-      if(nrow(files) > 0) {
-        values$selected_bigwig_files <- as.character(files$datapath)
+    req(input$browse_bigwig)
+    req(values$current_roots)
+    
+    tryCatch({
+      # Check if this is an actual file selection (not just folder navigation)
+      if(!is.integer(input$browse_bigwig)) {
+        files <- parseFilePaths(values$current_roots, input$browse_bigwig)
+        
+        # Only update if we actually got file paths back
+        if(!is.null(files) && nrow(files) > 0 && all(file.exists(files$datapath))) {
+          values$selected_bigwig_files <- as.character(files$datapath)
+          showNotification(paste("Selected", nrow(files), "BigWig file(s)"), 
+                           type = "message", duration = 2)
+        }
       }
-    }
+    }, error = function(e) {
+      # Silently ignore navigation errors - only notify for real problems
+      if(grepl("datapath", e$message)) {
+        showNotification("Error selecting files. Please try again.", type = "error")
+      }
+    })
   })
   
   observeEvent(input$browse_regions, {
-    if(!is.null(input$browse_regions) && !is.null(values$current_regions_roots)) {
-      files <- parseFilePaths(values$current_regions_roots, input$browse_regions)
-      if(nrow(files) > 0) {
-        values$selected_regions_file <- as.character(files$datapath)
+    req(input$browse_regions)
+    req(values$current_regions_roots)
+    
+    tryCatch({
+      # Check if this is an actual file selection (not just folder navigation)
+      if(!is.integer(input$browse_regions)) {
+        files <- parseFilePaths(values$current_regions_roots, input$browse_regions)
+        
+        # Only update if we actually got a valid file path back
+        if(!is.null(files) && nrow(files) > 0 && all(file.exists(files$datapath))) {
+          values$selected_regions_file <- as.character(files$datapath[1])
+          showNotification("Regions file selected", type = "message", duration = 2)
+        }
       }
-    }
+    }, error = function(e) {
+      # Silently ignore navigation errors - only notify for real problems
+      if(grepl("datapath", e$message)) {
+        showNotification("Error selecting file. Please try again.", type = "error")
+      }
+    })
   })
   
-  
-  # Observer for custom BigWig path
+  # Observer for custom BigWig path - IMPROVED VERSION
   observeEvent(input$custom_path_bigwig, {
     if(values$authenticated && input$custom_path_bigwig != "") {
-      custom_root <- file.path(values$volume_root, input$custom_path_bigwig)
-      if(dir.exists(custom_root)) {
-        values$current_roots <- setNames(custom_root, basename(custom_root))
-        shinyFileChoose(input, "browse_bigwig",
-                        roots = values$current_roots,
-                        filetypes = c("bw", "bigwig"))
-      } else {
-        showNotification("Custom path does not exist!", type = "warning")
+      # Clean the path - remove leading/trailing slashes and whitespace
+      clean_path <- gsub("^/+|/+$", "", trimws(input$custom_path_bigwig))
+      
+      tryCatch({
+        custom_root <- file.path(values$volume_root, clean_path)
+        
+        if(dir.exists(custom_root)) {
+          values$current_roots <- setNames(custom_root, basename(custom_root))
+          shinyFileChoose(input, "browse_bigwig",
+                          roots = values$current_roots,
+                          filetypes = c("bw", "bigwig"))
+          showNotification(paste("Browsing:", custom_root), type = "message", duration = 2)
+        } else {
+          showNotification(paste("Path does not exist:", custom_root), type = "warning")
+          # Reset to volume root on error
+          values$current_roots <- setNames(values$volume_root, input$group_name)
+          shinyFileChoose(input, "browse_bigwig",
+                          roots = values$current_roots,
+                          filetypes = c("bw", "bigwig"))
+        }
+      }, error = function(e) {
+        showNotification(paste("Error setting path:", e$message), type = "error")
+        # Always reset to volume root on any error
         values$current_roots <- setNames(values$volume_root, input$group_name)
         shinyFileChoose(input, "browse_bigwig",
                         roots = values$current_roots,
                         filetypes = c("bw", "bigwig"))
-      }
+      })
+    } else if(values$authenticated && input$custom_path_bigwig == "") {
+      # Reset to volume root when path is cleared
+      values$current_roots <- setNames(values$volume_root, input$group_name)
+      shinyFileChoose(input, "browse_bigwig",
+                      roots = values$current_roots,
+                      filetypes = c("bw", "bigwig"))
     }
   })
   
-  # Observer for custom regions path
+  # Observer for custom regions path - IMPROVED VERSION
   observeEvent(input$custom_path_regions, {
     if(values$authenticated && input$custom_path_regions != "") {
-      custom_root <- file.path(values$volume_root, input$custom_path_regions)
-      if(dir.exists(custom_root)) {
-        values$current_regions_roots <- setNames(custom_root, basename(custom_root))  # <- ADD THIS
+      # Clean the path - remove leading/trailing slashes and whitespace
+      clean_path <- gsub("^/+|/+$", "", trimws(input$custom_path_regions))
+      
+      tryCatch({
+        custom_root <- file.path(values$volume_root, clean_path)
+        
+        if(dir.exists(custom_root)) {
+          values$current_regions_roots <- setNames(custom_root, basename(custom_root))
+          shinyFileChoose(input, "browse_regions",
+                          roots = values$current_regions_roots,
+                          filetypes = c("bed", "txt", "csv"))
+          showNotification(paste("Browsing:", custom_root), type = "message", duration = 2)
+        } else {
+          showNotification(paste("Path does not exist:", custom_root), type = "warning")
+          # Reset to volume root on error
+          values$current_regions_roots <- setNames(values$volume_root, input$group_name)
+          shinyFileChoose(input, "browse_regions",
+                          roots = values$current_regions_roots,
+                          filetypes = c("bed", "txt", "csv"))
+        }
+      }, error = function(e) {
+        showNotification(paste("Error setting path:", e$message), type = "error")
+        # Always reset to volume root on any error
+        values$current_regions_roots <- setNames(values$volume_root, input$group_name)
         shinyFileChoose(input, "browse_regions",
-                        roots = values$current_regions_roots,  # <- USE THE STORED VALUE
+                        roots = values$current_regions_roots,
                         filetypes = c("bed", "txt", "csv"))
-      } else {
-        showNotification("Custom path does not exist!", type = "warning")
-        # Reset to volume root
-        values$current_regions_roots <- setNames(values$volume_root, input$group_name)  # <- ADD THIS
-        shinyFileChoose(input, "browse_regions",
-                        roots = values$current_regions_roots,  # <- USE THE STORED VALUE
-                        filetypes = c("bed", "txt", "csv"))
-      }
+      })
+    } else if(values$authenticated && input$custom_path_regions == "") {
+      # Reset to volume root when path is cleared
+      values$current_regions_roots <- setNames(values$volume_root, input$group_name)
+      shinyFileChoose(input, "browse_regions",
+                      roots = values$current_regions_roots,
+                      filetypes = c("bed", "txt", "csv"))
     }
   })
   
