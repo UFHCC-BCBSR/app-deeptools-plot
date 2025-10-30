@@ -96,12 +96,14 @@ ui <- fluidPage(
       }
     "))
   ),
+  
   div(class = "title-section",
       h1("DeepTools Plot Generator",
          style = "margin: 0; font-size: 48px; font-weight: 300;"),
       p("Generate heatmaps and profile plots from BigWig files using computeMatrix and plotHeatmap/plotProfile",
         style = "margin: 10px 0 0 0; font-size: 14px; opacity: 0.8;")
   ),
+  
   div(class = "step-section",
       h3("Parameter Management", style = "text-align: center; margin-bottom: 20px;"),
       div(class = "param-group",
@@ -115,6 +117,7 @@ ui <- fluidPage(
           div(id = "load_status", style = "margin-top: 10px;")
       )
   ),
+  
   div(class = "step-section",
       h3("HiPerGator File Access", style = "text-align: center; margin-bottom: 20px;"),
       uiOutput("auth_status"),
@@ -138,8 +141,10 @@ ui <- fluidPage(
         )
       )
   ),
+  
   div(class = "step-section",
       h2("Required Parameters", style = "text-align: center; margin-bottom: 30px;"),
+      
       div(class = "param-group",
           h4("Basic Configuration"),
           fluidRow(
@@ -152,8 +157,10 @@ ui <- fluidPage(
                                    selected = "heatmap"))
           )
       ),
+      
       div(class = "param-group",
           h4("Input Files"),
+          
           h5("BigWig Files", tags$span("*", style = "color: red;")),
           p("Select multiple BigWig files for analysis:"),
           conditionalPanel(
@@ -170,6 +177,7 @@ ui <- fluidPage(
                 tags$i(class = "fa fa-lock"), " Connect to a group above to browse HiPerGator files"
             )
           ),
+          
           br(),
           h5("Regions File (BED format)", tags$span("*", style = "color: red;")),
           p("Select the BED file containing regions of interest:"),
@@ -184,22 +192,34 @@ ui <- fluidPage(
           conditionalPanel(
             condition = "!output.authenticated",
             div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
-                tags$i(class = "fa fa-lock"), " Login above to browse HiPerGator files"
+                tags$i(class = "fa fa-lock"), " Connect to a group above to browse HiPerGator files"
             )
           ),
+          
           br(),
           h5("Sample Information File (CSV)", tags$span("*", style = "color: red; font-size: 12px;", "(Required for Profile plots)")),
-          p("Upload a CSV file with sample information. Required columns: sample, group, color. Optional: sample_label (for custom plot labels):"),
-          fileInput("sample_info_file", NULL,
-                    accept = ".csv",
-                    buttonLabel = "Browse for Sample Info...",
-                    placeholder = "No file selected",
-                    width = "100%"),
+          p("Select a CSV file with sample information. Required columns: sample, group, color. Optional: sample_label (for custom plot labels):"),
+          conditionalPanel(
+            condition = "output.authenticated",
+            textInput("custom_path_sample_info", "Directory Path:", value = "",
+                      placeholder = "Enter path relative to volume..."),
+            shinyFilesButton("browse_sample_info", "Browse Sample Info File",
+                             "Select CSV file", class = "btn-info", multiple = FALSE),
+            uiOutput("selected_sample_info_file")
+          ),
+          conditionalPanel(
+            condition = "!output.authenticated",
+            div(style = "padding: 10px; text-align: center; color: #856404; font-size: 12px;",
+                tags$i(class = "fa fa-lock"), " Connect to a group above to browse HiPerGator files"
+            )
+          ),
           uiOutput("sample_info_preview")
       )
   ),
+  
   div(class = "step-section",
       h2("Analysis Parameters", style = "text-align: center; margin-bottom: 30px;"),
+      
       div(class = "param-group",
           h4("computeMatrix Parameters"),
           fluidRow(
@@ -229,6 +249,7 @@ ui <- fluidPage(
                                   selected = "max"))
           )
       ),
+      
       # Conditional UI for plot-specific parameters
       conditionalPanel(
         condition = "input.plot_type == 'heatmap'",
@@ -256,6 +277,7 @@ ui <- fluidPage(
                           placeholder = "Sample1\nSample2\nSample3", rows = 4)
         )
       ),
+      
       conditionalPanel(
         condition = "input.plot_type == 'profile'",
         div(class = "param-group",
@@ -279,8 +301,10 @@ ui <- fluidPage(
         )
       )
   ),
+  
   div(class = "step-section",
       h2("Computational Resources", style = "text-align: center; margin-bottom: 30px;"),
+      
       div(class = "param-group",
           h4("SLURM Job Parameters"),
           fluidRow(
@@ -298,8 +322,10 @@ ui <- fluidPage(
                     placeholder = "your.email@ufl.edu")
       )
   ),
+  
   div(class = "step-section",
       h2("Generate and Run Analysis", style = "text-align: center; margin-bottom: 30px;"),
+      
       div(style = "text-align: center;",
           actionButton("validate_params", "Validate Parameters", class = "btn-secondary btn-lg"),
           br(), br(),
@@ -328,6 +354,7 @@ server <- function(input, output, session) {
     volume_root = NULL,
     selected_bigwig_files = NULL,
     selected_regions_file = NULL,
+    selected_sample_info_file = NULL,
     sample_info = NULL,
     filtered_bigwig_files = NULL,
     processed_sample_info = NULL,
@@ -335,12 +362,13 @@ server <- function(input, output, session) {
     process = NULL,
     output_dir = NULL,
     current_roots = NULL,
-    current_regions_roots = NULL
+    current_regions_roots = NULL,
+    current_sample_info_roots = NULL
   )
   
-  # Process sample info file when uploaded
-  observeEvent(input$sample_info_file, {
-    if(is.null(input$sample_info_file)) {
+  # Process sample info file when selected
+  observeEvent(values$selected_sample_info_file, {
+    if(is.null(values$selected_sample_info_file)) {
       values$sample_info <- NULL
       values$filtered_bigwig_files <- NULL
       values$processed_sample_info <- NULL
@@ -348,8 +376,8 @@ server <- function(input, output, session) {
     }
     
     tryCatch({
-      # Read the CSV file
-      sample_data <- read.csv(input$sample_info_file$datapath, stringsAsFactors = FALSE)
+      # Read the CSV file from HiPerGator
+      sample_data <- read.csv(values$selected_sample_info_file, stringsAsFactors = FALSE)
       
       # Validate columns
       required_cols <- c("sample", "group", "color")
@@ -377,6 +405,8 @@ server <- function(input, output, session) {
       if(!is.null(values$selected_bigwig_files)) {
         process_bigwig_files()
       }
+      
+      showNotification("Sample information file loaded successfully!", type = "message")
       
     }, error = function(e) {
       showNotification(paste("Error reading CSV file:", e$message), type = "error")
@@ -433,14 +463,14 @@ server <- function(input, output, session) {
       div(
         h6("Sample Information Preview:"),
         div(class = "selected-file",
-            style = "max-height: 120px;",  # Remove overflow-y: auto from here
+            style = "max-height: 120px;",
             DT::renderDataTable({
               values$sample_info
             }, options = list(
-              pageLength = -1,  # Show all rows
-              dom = 't',        # Table only
-              scrollX = TRUE,   # Horizontal scroll
-              scrollY = "100px", # Vertical scroll with specific height
+              pageLength = -1,
+              dom = 't',
+              scrollX = TRUE,
+              scrollY = "100px",
               scrollCollapse = TRUE,
               paging = FALSE,
               searching = FALSE,
@@ -449,7 +479,7 @@ server <- function(input, output, session) {
         ),
         if(!is.null(values$filtered_bigwig_files)) {
           div(style = "margin-top: 10px;",
-              h6(paste("Matched", length(values$filtered_bigwig_files), "BigWig files out of", 
+              h6(paste("Matched", length(values$filtered_bigwig_files), "BigWig files out of",
                        length(values$selected_bigwig_files), "selected:")),
               div(class = "selected-file",
                   paste(basename(values$filtered_bigwig_files), collapse = "\n"))
@@ -466,16 +496,22 @@ server <- function(input, output, session) {
         values$authenticated <- TRUE
         values$volume_root <- volume_root
         
-        # Initialize BOTH roots immediately
+        # Initialize ALL THREE roots immediately
         values$current_roots <- setNames(volume_root, input$group_name)
         values$current_regions_roots <- setNames(volume_root, input$group_name)
+        values$current_sample_info_roots <- setNames(volume_root, input$group_name)
         
         shinyFileChoose(input, "browse_bigwig",
                         roots = values$current_roots,
                         filetypes = c("bw", "bigwig"))
+        
         shinyFileChoose(input, "browse_regions",
                         roots = values$current_regions_roots,
                         filetypes = c("bed", "txt", "csv"))
+        
+        shinyFileChoose(input, "browse_sample_info",
+                        roots = values$current_sample_info_roots,
+                        filetypes = c("csv", "txt"))
         
         showNotification("Successfully connected to group directory!", type = "message")
       } else {
@@ -489,6 +525,10 @@ server <- function(input, output, session) {
     values$volume_root <- NULL
     values$selected_bigwig_files <- NULL
     values$selected_regions_file <- NULL
+    values$selected_sample_info_file <- NULL
+    values$sample_info <- NULL
+    values$filtered_bigwig_files <- NULL
+    values$processed_sample_info <- NULL
   })
   
   output$authenticated <- reactive({
@@ -513,19 +553,15 @@ server <- function(input, output, session) {
     req(values$current_roots)
     
     tryCatch({
-      # Check if this is an actual file selection (not just folder navigation)
       if(!is.integer(input$browse_bigwig)) {
         files <- parseFilePaths(values$current_roots, input$browse_bigwig)
-        
-        # Only update if we actually got file paths back
         if(!is.null(files) && nrow(files) > 0 && all(file.exists(files$datapath))) {
           values$selected_bigwig_files <- as.character(files$datapath)
-          showNotification(paste("Selected", nrow(files), "BigWig file(s)"), 
+          showNotification(paste("Selected", nrow(files), "BigWig file(s)"),
                            type = "message", duration = 2)
         }
       }
     }, error = function(e) {
-      # Silently ignore navigation errors - only notify for real problems
       if(grepl("datapath", e$message)) {
         showNotification("Error selecting files. Please try again.", type = "error")
       }
@@ -537,33 +573,46 @@ server <- function(input, output, session) {
     req(values$current_regions_roots)
     
     tryCatch({
-      # Check if this is an actual file selection (not just folder navigation)
       if(!is.integer(input$browse_regions)) {
         files <- parseFilePaths(values$current_regions_roots, input$browse_regions)
-        
-        # Only update if we actually got a valid file path back
         if(!is.null(files) && nrow(files) > 0 && all(file.exists(files$datapath))) {
           values$selected_regions_file <- as.character(files$datapath[1])
           showNotification("Regions file selected", type = "message", duration = 2)
         }
       }
     }, error = function(e) {
-      # Silently ignore navigation errors - only notify for real problems
       if(grepl("datapath", e$message)) {
         showNotification("Error selecting file. Please try again.", type = "error")
       }
     })
   })
   
-  # Observer for custom BigWig path - IMPROVED VERSION
+  # NEW: Observer for sample info file browser
+  observeEvent(input$browse_sample_info, {
+    req(input$browse_sample_info)
+    req(values$current_sample_info_roots)
+    
+    tryCatch({
+      if(!is.integer(input$browse_sample_info)) {
+        files <- parseFilePaths(values$current_sample_info_roots, input$browse_sample_info)
+        if(!is.null(files) && nrow(files) > 0 && all(file.exists(files$datapath))) {
+          values$selected_sample_info_file <- as.character(files$datapath[1])
+          showNotification("Sample info file selected", type = "message", duration = 2)
+        }
+      }
+    }, error = function(e) {
+      if(grepl("datapath", e$message)) {
+        showNotification("Error selecting file. Please try again.", type = "error")
+      }
+    })
+  })
+  
+  # Observer for custom BigWig path
   observeEvent(input$custom_path_bigwig, {
     if(values$authenticated && input$custom_path_bigwig != "") {
-      # Clean the path - remove leading/trailing slashes and whitespace
       clean_path <- gsub("^/+|/+$", "", trimws(input$custom_path_bigwig))
-      
       tryCatch({
         custom_root <- file.path(values$volume_root, clean_path)
-        
         if(dir.exists(custom_root)) {
           values$current_roots <- setNames(custom_root, basename(custom_root))
           shinyFileChoose(input, "browse_bigwig",
@@ -572,7 +621,6 @@ server <- function(input, output, session) {
           showNotification(paste("Browsing:", custom_root), type = "message", duration = 2)
         } else {
           showNotification(paste("Path does not exist:", custom_root), type = "warning")
-          # Reset to volume root on error
           values$current_roots <- setNames(values$volume_root, input$group_name)
           shinyFileChoose(input, "browse_bigwig",
                           roots = values$current_roots,
@@ -580,14 +628,12 @@ server <- function(input, output, session) {
         }
       }, error = function(e) {
         showNotification(paste("Error setting path:", e$message), type = "error")
-        # Always reset to volume root on any error
         values$current_roots <- setNames(values$volume_root, input$group_name)
         shinyFileChoose(input, "browse_bigwig",
                         roots = values$current_roots,
                         filetypes = c("bw", "bigwig"))
       })
     } else if(values$authenticated && input$custom_path_bigwig == "") {
-      # Reset to volume root when path is cleared
       values$current_roots <- setNames(values$volume_root, input$group_name)
       shinyFileChoose(input, "browse_bigwig",
                       roots = values$current_roots,
@@ -595,15 +641,12 @@ server <- function(input, output, session) {
     }
   })
   
-  # Observer for custom regions path - IMPROVED VERSION
+  # Observer for custom regions path
   observeEvent(input$custom_path_regions, {
     if(values$authenticated && input$custom_path_regions != "") {
-      # Clean the path - remove leading/trailing slashes and whitespace
       clean_path <- gsub("^/+|/+$", "", trimws(input$custom_path_regions))
-      
       tryCatch({
         custom_root <- file.path(values$volume_root, clean_path)
-        
         if(dir.exists(custom_root)) {
           values$current_regions_roots <- setNames(custom_root, basename(custom_root))
           shinyFileChoose(input, "browse_regions",
@@ -612,7 +655,6 @@ server <- function(input, output, session) {
           showNotification(paste("Browsing:", custom_root), type = "message", duration = 2)
         } else {
           showNotification(paste("Path does not exist:", custom_root), type = "warning")
-          # Reset to volume root on error
           values$current_regions_roots <- setNames(values$volume_root, input$group_name)
           shinyFileChoose(input, "browse_regions",
                           roots = values$current_regions_roots,
@@ -620,14 +662,12 @@ server <- function(input, output, session) {
         }
       }, error = function(e) {
         showNotification(paste("Error setting path:", e$message), type = "error")
-        # Always reset to volume root on any error
         values$current_regions_roots <- setNames(values$volume_root, input$group_name)
         shinyFileChoose(input, "browse_regions",
                         roots = values$current_regions_roots,
                         filetypes = c("bed", "txt", "csv"))
       })
     } else if(values$authenticated && input$custom_path_regions == "") {
-      # Reset to volume root when path is cleared
       values$current_regions_roots <- setNames(values$volume_root, input$group_name)
       shinyFileChoose(input, "browse_regions",
                       roots = values$current_regions_roots,
@@ -635,8 +675,41 @@ server <- function(input, output, session) {
     }
   })
   
+  # NEW: Observer for custom sample info path
+  observeEvent(input$custom_path_sample_info, {
+    if(values$authenticated && input$custom_path_sample_info != "") {
+      clean_path <- gsub("^/+|/+$", "", trimws(input$custom_path_sample_info))
+      tryCatch({
+        custom_root <- file.path(values$volume_root, clean_path)
+        if(dir.exists(custom_root)) {
+          values$current_sample_info_roots <- setNames(custom_root, basename(custom_root))
+          shinyFileChoose(input, "browse_sample_info",
+                          roots = values$current_sample_info_roots,
+                          filetypes = c("csv", "txt"))
+          showNotification(paste("Browsing:", custom_root), type = "message", duration = 2)
+        } else {
+          showNotification(paste("Path does not exist:", custom_root), type = "warning")
+          values$current_sample_info_roots <- setNames(values$volume_root, input$group_name)
+          shinyFileChoose(input, "browse_sample_info",
+                          roots = values$current_sample_info_roots,
+                          filetypes = c("csv", "txt"))
+        }
+      }, error = function(e) {
+        showNotification(paste("Error setting path:", e$message), type = "error")
+        values$current_sample_info_roots <- setNames(values$volume_root, input$group_name)
+        shinyFileChoose(input, "browse_sample_info",
+                        roots = values$current_sample_info_roots,
+                        filetypes = c("csv", "txt"))
+      })
+    } else if(values$authenticated && input$custom_path_sample_info == "") {
+      values$current_sample_info_roots <- setNames(values$volume_root, input$group_name)
+      shinyFileChoose(input, "browse_sample_info",
+                      roots = values$current_sample_info_roots,
+                      filetypes = c("csv", "txt"))
+    }
+  })
+  
   output$selected_bigwig_files <- renderUI({
-    # Show filtered files if sample info is uploaded, otherwise show all selected files
     files_to_show <- if(!is.null(values$filtered_bigwig_files)) {
       values$filtered_bigwig_files
     } else {
@@ -661,6 +734,16 @@ server <- function(input, output, session) {
     }
   })
   
+  # NEW: Output for selected sample info file
+  output$selected_sample_info_file <- renderUI({
+    if(!is.null(values$selected_sample_info_file)) {
+      div(
+        h6("Selected sample info file:"),
+        div(class = "selected-file", basename(values$selected_sample_info_file))
+      )
+    }
+  })
+  
   observe({
     if(values$authenticated && input$sbatch_account == "") {
       updateTextInput(session, "sbatch_account", value = input$group_name)
@@ -671,7 +754,6 @@ server <- function(input, output, session) {
     errors <- c()
     warnings <- c()
     
-    # Use filtered files if available, otherwise use all selected files
     bigwig_files_to_use <- if(!is.null(values$filtered_bigwig_files)) {
       values$filtered_bigwig_files
     } else {
@@ -694,7 +776,6 @@ server <- function(input, output, session) {
       errors <- c(errors, "Output directory is required")
     }
     
-    # Always require sbatch parameters now
     if(input$sbatch_account == "" || is.null(input$sbatch_account)) {
       errors <- c(errors, "Account is required for SLURM submission")
     }
@@ -755,7 +836,6 @@ server <- function(input, output, session) {
     
     template_content <- readLines(template_file)
     
-    # Use filtered files if available, otherwise use all selected files
     bigwig_files_to_use <- if(!is.null(values$filtered_bigwig_files)) {
       values$filtered_bigwig_files
     } else {
@@ -780,10 +860,8 @@ server <- function(input, output, session) {
       # For profile plots, use sample_label if available, otherwise use sample
       if(!is.null(values$processed_sample_info)) {
         if("sample_label" %in% colnames(values$processed_sample_info)) {
-          # Use sample_label column
           sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample_label, collapse = '" "'), '"')
         } else {
-          # Fall back to sample column
           sample_labels_str <- paste0('"', paste(values$processed_sample_info$sample, collapse = '" "'), '"')
         }
       } else {
@@ -849,16 +927,13 @@ server <- function(input, output, session) {
       script_content <- gsub("{{PLOT_TITLE_PROFILE}}", input$plot_title_profile, script_content, fixed = TRUE)
       
       if(!is.null(values$processed_sample_info)) {
-        # Use sample_label if available, otherwise fall back to sample
         if("sample_label" %in% colnames(values$processed_sample_info)) {
           sample_labels_str <- paste(values$processed_sample_info$sample_label, collapse = " ")
         } else {
           sample_labels_str <- paste(values$processed_sample_info$sample, collapse = " ")
         }
-        
         sample_colors_str <- paste(tolower(values$processed_sample_info$color), collapse = " ")
         
-        # Substitute into template
         script_content <- gsub("{{SAMPLE_LABELS_OVERLAY}}", sample_labels_str, script_content, fixed = TRUE)
         script_content <- gsub("{{SAMPLE_COLORS_OVERLAY}}", sample_colors_str, script_content, fixed = TRUE)  
       }
@@ -911,7 +986,6 @@ server <- function(input, output, session) {
     
     template_name <- paste0("templates/", input$plot_type, "_slurm.sbatch")
     script_content <- generate_script_from_template(template_name)
-    
     script_file <- file.path(values$output_dir, paste0(input$plot_type, "_analysis.sbatch"))
     writeLines(script_content, script_file)
     
@@ -1001,7 +1075,7 @@ server <- function(input, output, session) {
         plot_type = input$plot_type,
         selected_bigwig_files = values$selected_bigwig_files,
         selected_regions_file = values$selected_regions_file,
-        sample_info_file = if(!is.null(input$sample_info_file)) input$sample_info_file$name else NULL,
+        selected_sample_info_file = values$selected_sample_info_file,
         reference_point = input$reference_point,
         before_region = input$before_region,
         after_region = input$after_region,
@@ -1105,6 +1179,17 @@ server <- function(input, output, session) {
         values$selected_regions_file <- NULL
       }
       
+      # NEW: Handle sample info file selection
+      if(!is.null(params$selected_sample_info_file)) {
+        if(is.list(params$selected_sample_info_file)) {
+          values$selected_sample_info_file <- unlist(params$selected_sample_info_file)[1]
+        } else {
+          values$selected_sample_info_file <- params$selected_sample_info_file
+        }
+      } else {
+        values$selected_sample_info_file <- NULL
+      }
+      
       showNotification("Parameters loaded successfully!", type = "message")
       
     }, error = function(e) {
@@ -1113,20 +1198,20 @@ server <- function(input, output, session) {
   })
   
   observe({
-    # Add this check at the very beginning
     if(is.null(values$output_dir) || !dir.exists(values$output_dir)) {
       return()
     }
     
     files <- list.files(values$output_dir, full.names = TRUE)
+    
     if(length(files) > 0) {
       for(i in seq_along(files)) {
         file_path <- files[i]
         file_name <- basename(file_path)
-        # Make sure handler_id is never empty
+        
         handler_id <- paste0("download_", gsub("[^a-zA-Z0-9]", "_", file_name))
         if(handler_id == "download_" || nchar(handler_id) <= 9) {
-          next  # skip if the handler_id would be invalid
+          next
         }
         
         local({
